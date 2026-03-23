@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "host": "127.0.0.1",
+  "port": 8091,
+  "service_name": "local-text-service",
+  "model_status": "configured",
+  "runner_type": "llama_cpp_server",
+  "runner_host": "127.0.0.1",
+  "runner_port": 8092,
+  "runner_binary_path": "vendor/text_runner/llama-b8292-bin-win-cpu-x64/llama-server.exe",
+  "model_format": "gguf",
+  "model_path": "vendor/text_models/qwen2.5-7b-instruct-q4_k_m.gguf"
+}
