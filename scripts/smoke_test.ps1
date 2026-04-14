@@ -145,6 +145,7 @@ $exitCode = 0
 $logsRoot = $null
 $smokeStatusFile = $null
 $internalNote = $null
+$renderElapsedSeconds = $null
 
 try {
     $repoRoot = Get-RepoRoot
@@ -254,6 +255,7 @@ try {
                         $renderStatus = $null
                         $renderExitCode = 1
                         $renderDeadline = (Get-Date).AddSeconds(10)
+                        $renderStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
                         do {
                             $renderInvoke = Invoke-PythonJsonStatus `
                                 -PythonExe $venvPython `
@@ -279,9 +281,11 @@ try {
 
                             Start-Sleep -Milliseconds 1000
                         } while ((Get-Date) -lt $renderDeadline)
+                        $renderStopwatch.Stop()
+                        $renderElapsedSeconds = [math]::Round($renderStopwatch.Elapsed.TotalSeconds, 1)
 
                         if (-not (Test-ValidStatusPayload -Payload $renderStatus)) {
-                            $result = @{ status = "error"; mode = $null; output_file = $null; error_type = "api_error"; blocker = "api_error" }
+                            $result = @{ status = "error"; mode = $null; output_file = $null; error_type = "api_error"; blocker = "api_error"; elapsed_seconds = $renderElapsedSeconds }
                             $exitCode = 1
                         } elseif ($renderExitCode -ne 0 -or $renderStatus.status -ne "ok") {
                             $renderMode = $null
@@ -302,6 +306,7 @@ try {
                                 output_file = $null
                                 error_type = $renderErrorType
                                 blocker = $renderBlocker
+                                elapsed_seconds = $renderElapsedSeconds
                             }
                             $exitCode = 1
                         } else {
@@ -309,6 +314,7 @@ try {
                                 status = "ok"
                                 mode = "$($renderStatus.mode)"
                                 output_file = if ($null -ne $renderStatus.output_file) { "$($renderStatus.output_file)" } else { $null }
+                                elapsed_seconds = $renderElapsedSeconds
                             }
                         }
                     }

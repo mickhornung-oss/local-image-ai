@@ -39,6 +39,16 @@ from render_text2img import (
 
 IDENTITY_MULTI_REFERENCE_MODE = "identity_multi_reference"
 IDENTITY_MULTI_REFERENCE_WORKFLOW_NAME = "v6_2_instantid_multi_reference_api.json"
+IDENTITY_MULTI_REFERENCE_DEFAULT_STEPS = 30
+IDENTITY_MULTI_REFERENCE_DEFAULT_CFG = 4.5
+IDENTITY_MULTI_REFERENCE_WAIT_TIMEOUT = 300
+IDENTITY_MULTI_REFERENCE_MAX_ACTIVE_REFERENCES = 2
+IDENTITY_MULTI_REFERENCE_PROMPT_SUFFIX = (
+    "same person as the reference images, preserve recognizable face, same identity, same hair color, same key facial features"
+)
+IDENTITY_MULTI_REFERENCE_NEGATIVE_SUFFIX = (
+    "different person, different face, different hair color, different hairstyle, identity drift, unrecognizable face"
+)
 IDENTITY_MULTI_REFERENCE_REQUIRED_NODES = (
     "InstantIDModelLoader",
     "InstantIDFaceAnalysis",
@@ -102,6 +112,7 @@ def stage_multi_reference_images_for_comfy(adapter_state: dict[str, Any]) -> lis
     references = adapter_state.get("references")
     if not isinstance(references, list) or not references:
         raise ValueError("insufficient_multi_reference_images")
+    references = references[:IDENTITY_MULTI_REFERENCE_MAX_ACTIVE_REFERENCES]
 
     target_dir = comfy_app_input_dir() / MULTI_REFERENCE_STAGING_SUBFOLDER
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -182,14 +193,14 @@ def run_identity_multi_reference(
     checkpoint: str | None = None,
     negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
     seed: int = -1,
-    steps: int = DEFAULT_STEPS,
-    cfg: float = DEFAULT_CFG,
+    steps: int = IDENTITY_MULTI_REFERENCE_DEFAULT_STEPS,
+    cfg: float = IDENTITY_MULTI_REFERENCE_DEFAULT_CFG,
     width: int = DEFAULT_WIDTH,
     height: int = DEFAULT_HEIGHT,
     base_url: str = DEFAULT_BASE_URL,
     timeout: int = DEFAULT_REQUEST_TIMEOUT,
     wait: bool = False,
-    wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
+    wait_timeout: int = IDENTITY_MULTI_REFERENCE_WAIT_TIMEOUT,
     output_dir: Path | None = None,
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
@@ -226,15 +237,23 @@ def run_identity_multi_reference(
         }
 
     effective_adapter_state = runtime_state["adapter_state"]
-    references = effective_adapter_state["references"]
+    references = effective_adapter_state["references"][:IDENTITY_MULTI_REFERENCE_MAX_ACTIVE_REFERENCES]
     try:
         workflow_payload = load_workflow(workflow_path())
+        effective_prompt = str(prompt or "").strip()
+        if effective_prompt:
+            effective_prompt = f"{effective_prompt}, {IDENTITY_MULTI_REFERENCE_PROMPT_SUFFIX}"
+        effective_negative_prompt = str(negative_prompt or "").strip()
+        if effective_negative_prompt:
+            effective_negative_prompt = f"{effective_negative_prompt}, {IDENTITY_MULTI_REFERENCE_NEGATIVE_SUFFIX}"
+        else:
+            effective_negative_prompt = IDENTITY_MULTI_REFERENCE_NEGATIVE_SUFFIX
         staged_image_names = stage_multi_reference_images_for_comfy(effective_adapter_state)
         queued_prompt = mutate_multi_reference_workflow(
             workflow=workflow_payload,
             staged_image_names=staged_image_names,
-            prompt_text=prompt,
-            negative_prompt=negative_prompt,
+            prompt_text=effective_prompt,
+            negative_prompt=effective_negative_prompt,
             seed=seed_value,
             steps=steps,
             cfg=cfg,
@@ -306,7 +325,7 @@ def run_identity_multi_reference(
             payload["reference_count"] = len(references)
             payload["reference_slots"] = [int(reference["slot_index"]) for reference in references]
             payload["reference_image_ids"] = [str(reference["image_id"]) for reference in references]
-            payload["multi_reference_strategy"] = "instantid_image_batch_average"
+            payload["multi_reference_strategy"] = "instantid_primary_two_reference_batch"
             return payload
 
         payload = build_success_payload(
@@ -318,7 +337,7 @@ def run_identity_multi_reference(
         payload["reference_count"] = len(references)
         payload["reference_slots"] = [int(reference["slot_index"]) for reference in references]
         payload["reference_image_ids"] = [str(reference["image_id"]) for reference in references]
-        payload["multi_reference_strategy"] = "instantid_image_batch_average"
+        payload["multi_reference_strategy"] = "instantid_primary_two_reference_batch"
         return payload
     except ComfyClientError as exc:
         error_text = str(exc)

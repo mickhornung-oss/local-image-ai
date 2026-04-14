@@ -29,6 +29,33 @@ function Resolve-LocalPath {
     return [System.IO.Path]::GetFullPath($candidate)
 }
 
+function Write-ConfigModelPath {
+    param(
+        [string]$ConfigPath,
+        [string]$ModelPath
+    )
+
+    $payload = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
+    $payload.model_path = $ModelPath
+    if ([string]::IsNullOrWhiteSpace("$($payload.model_status)")) {
+        $payload.model_status = "configured"
+    }
+    $json = $payload | ConvertTo-Json -Depth 16
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($ConfigPath, $json, $utf8NoBom)
+}
+
+function Clear-ModelSwitchState {
+    param(
+        [string]$RepoRoot
+    )
+
+    $statePath = Join-Path $RepoRoot "vendor\\text_runner\\logs\\model_switch.state.json"
+    if (Test-Path $statePath) {
+        Remove-Item $statePath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Test-RunnerHealth {
     param(
         [string]$Url
@@ -87,12 +114,21 @@ try {
     $runnerPort = [int]$config.runner_port
     $runnerUrl = "http://127.0.0.1:$runnerPort"
     $runnerBinaryPath = Resolve-LocalPath -RepoRoot $repoRoot -Value "$($config.runner_binary_path)"
-    $modelPath = Resolve-LocalPath -RepoRoot $repoRoot -Value "$($config.model_path)"
+    $configuredModelValue = "$($config.model_path)"
+    $startupModelValue = "$($config.startup_model_path)"
+    $modelPath = Resolve-LocalPath -RepoRoot $repoRoot -Value $configuredModelValue
+    $startupModelPath = Resolve-LocalPath -RepoRoot $repoRoot -Value $startupModelValue
+    $effectiveModelPath = $modelPath
+    $effectiveModelValue = $configuredModelValue
+    if ($startupModelPath -and (Test-Path $startupModelPath)) {
+        $effectiveModelPath = $startupModelPath
+        $effectiveModelValue = $startupModelValue
+    }
 
     if (-not $runnerBinaryPath -or -not (Test-Path $runnerBinaryPath)) {
         $result = @{ status = "error"; reason = "runner_binary_missing" }
         $exitCode = 1
-    } elseif (-not $modelPath -or -not (Test-Path $modelPath)) {
+    } elseif (-not $effectiveModelPath -or -not (Test-Path $effectiveModelPath)) {
         $result = @{ status = "error"; reason = "model_missing" }
         $exitCode = 1
     } else {
@@ -104,7 +140,7 @@ try {
                 pid = (Get-ListenerPid -LocalPort $runnerPort)
                 url = $runnerUrl
                 runner_binary_path = $runnerBinaryPath
-                model_path = $modelPath
+                model_path = $effectiveModelPath
             }
         } else {
             $listenerPid = Get-ListenerPid -LocalPort $runnerPort
@@ -120,30 +156,36 @@ try {
                     New-Item -ItemType Directory -Path $logsRoot | Out-Null
                 }
 
+                if (-not [string]::IsNullOrWhiteSpace($effectiveModelValue) -and $configuredModelValue -ne $effectiveModelValue) {
+                    Write-ConfigModelPath -ConfigPath $resolvedConfigPath -ModelPath $effectiveModelValue
+                }
+
                 $stdoutLog = Join-Path $logsRoot "llama-server.stdout.log"
                 $stderrLog = Join-Path $logsRoot "llama-server.stderr.log"
-                $quotedModelPath = '"' + $modelPath + '"'
+                $quotedModelPath = '"' + $effectiveModelPath + '"'
+                $runnerContextSize = 4096
                 $argumentList = @(
                     "--model", $quotedModelPath,
                     "--host", "127.0.0.1",
                     "--port", "$runnerPort",
-                    "--ctx-size", "2048"
+                    "--ctx-size", "$runnerContextSize"
                 )
 
                 $process = Start-Process -FilePath $runnerBinaryPath -ArgumentList $argumentList -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
 
-                $deadline = (Get-Date).AddSeconds(90)
+                $deadline = (Get-Date).AddSeconds(300)
                 do {
                     Start-Sleep -Milliseconds 500
                     $healthProbe = Test-RunnerHealth -Url $runnerUrl
                     if ($healthProbe.Ok) {
+                        Clear-ModelSwitchState -RepoRoot $repoRoot
                         $result = @{
                             status = "started"
                             port = $runnerPort
                             pid = $process.Id
                             url = $runnerUrl
                             runner_binary_path = $runnerBinaryPath
-                            model_path = $modelPath
+                            model_path = $effectiveModelPath
                         }
                         break
                     }

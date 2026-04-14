@@ -1,0 +1,35 @@
+{
+  "name": "code-ki-v1",
+  "displayName": "Code KI V1",
+  "description": "Lokale Python-KI fuer VS Code mit localhost-Backend.",
+  "version": "1.0.0",
+  "publisher": "mickh-local",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:codeKI.openAssistant"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeKI.openAssistant",
+        "title": "Code KI: Assistent oeffnen"
+      }
+    ],
+    "configuration": {
+      "title": "Code KI",
+      "properties": {
+        "codeKI.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8787",
+          "description": "Lokale Backend-URL fuer Code KI."
+        }
+      }
+    }
+  }
+}

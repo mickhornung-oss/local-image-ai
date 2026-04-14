@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet("start", "status", "stop")]
-    [string]$Action = "status"
+    [string]$Action = "status",
+    [switch]$UserMode
 )
 
 $ErrorActionPreference = "Stop"
@@ -337,6 +338,24 @@ function Get-StackLiveStatus {
     return @($orderedIds | ForEach-Object { Get-ComponentLiveStatus -ComponentId $_ -State $State })
 }
 
+function Wait-ForStackReadyAfterStart {
+    param(
+        [object]$State,
+        [int]$Seconds = 20
+    )
+
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    do {
+        $liveStatus = Get-StackLiveStatus -State $State
+        if (@($liveStatus | Where-Object { -not $_.running }).Count -eq 0) {
+            return $liveStatus
+        }
+        Start-Sleep -Milliseconds 1000
+    } while ((Get-Date) -lt $deadline)
+
+    return $liveStatus
+}
+
 function Write-StackStatus {
     param(
         [string]$ActionLabel,
@@ -352,6 +371,31 @@ function Write-StackStatus {
         $managedText = if ($item.managed) { "ja" } else { "nein" }
         $detailText = if ([string]::IsNullOrWhiteSpace("$($item.detail)")) { "-" } else { "$($item.detail)" }
         Write-Output ("{0,-12} {1,-7} {2,4}  {3,-6} {4,-10} {5}" -f $item.label, $statusText, $item.port, $pidText, $managedText, $detailText)
+    }
+}
+
+function Convert-StartStatusLabel {
+    param([string]$Status)
+
+    switch ("$Status") {
+        "started" { return "gestartet" }
+        "already_running" { return "lief bereits" }
+        "error" { return "fehler" }
+        default { return "$Status" }
+    }
+}
+
+function Write-UserFriendlyStatus {
+    param(
+        [string]$ActionLabel,
+        [object[]]$StatusItems
+    )
+
+    Write-Output "Stack $ActionLabel"
+    foreach ($item in $StatusItems) {
+        $stateText = if ($item.running) { "bereit" } else { "nicht bereit" }
+        $detailText = if ([string]::IsNullOrWhiteSpace("$($item.detail)")) { "" } else { " ($($item.detail))" }
+        Write-Output ("- {0}: {1}{2}" -f $item.label, $stateText, $detailText)
     }
 }
 
@@ -391,6 +435,10 @@ $exitCode = 0
 
 switch ($Action) {
     "start" {
+        if ($UserMode) {
+            Write-Output "Stack-Start laeuft..."
+        }
+
         $scriptRuns = @(
             @{ id = "comfyui"; label = "ComfyUI"; path = (Join-Path $PSScriptRoot "run_comfyui.ps1"); timeout = 120 },
             @{ id = "text_runner"; label = "Text-Runner"; path = (Join-Path $PSScriptRoot "run_text_runner.ps1"); timeout = 180 },
@@ -415,15 +463,31 @@ switch ($Action) {
         }
 
         Save-StackState -Path $statePath -Components $componentState
-        $liveStatus = Get-StackLiveStatus -State (Read-StatusFile -Path $statePath)
+        $liveStatus = Wait-ForStackReadyAfterStart -State (Read-StatusFile -Path $statePath)
 
-        Write-Output "Start-Ergebnis"
-        foreach ($summary in $startSummaries) {
-            $reasonText = if ([string]::IsNullOrWhiteSpace($summary.reason)) { "" } else { " | $($summary.reason)" }
-            Write-Output ("- {0}: {1}{2}" -f $summary.label, $summary.status, $reasonText)
+        if ($UserMode) {
+            Write-Output "Start-Ergebnis"
+            foreach ($summary in $startSummaries) {
+                $statusLabel = Convert-StartStatusLabel -Status $summary.status
+                $reasonText = if ([string]::IsNullOrWhiteSpace($summary.reason)) { "" } else { " | $($summary.reason)" }
+                Write-Output ("- {0}: {1}{2}" -f $summary.label, $statusLabel, $reasonText)
+            }
+            Write-Output ""
+            Write-UserFriendlyStatus -ActionLabel "Status nach Start" -StatusItems $liveStatus
+            $appStatus = @($liveStatus | Where-Object { $_.id -eq "app" }) | Select-Object -First 1
+            if ($null -ne $appStatus -and $appStatus.running -eq $true) {
+                Write-Output ""
+                Write-Output "App erreichbar: http://127.0.0.1:8090"
+            }
+        } else {
+            Write-Output "Start-Ergebnis"
+            foreach ($summary in $startSummaries) {
+                $reasonText = if ([string]::IsNullOrWhiteSpace($summary.reason)) { "" } else { " | $($summary.reason)" }
+                Write-Output ("- {0}: {1}{2}" -f $summary.label, $summary.status, $reasonText)
+            }
+            Write-Output ""
+            Write-StackStatus -ActionLabel "Status nach Start" -StatusItems $liveStatus
         }
-        Write-Output ""
-        Write-StackStatus -ActionLabel "Status nach Start" -StatusItems $liveStatus
 
         if (@($liveStatus | Where-Object { -not $_.running }).Count -gt 0) {
             $exitCode = 1
@@ -431,7 +495,11 @@ switch ($Action) {
     }
     "status" {
         $liveStatus = Get-StackLiveStatus -State $existingState
-        Write-StackStatus -ActionLabel "Status" -StatusItems $liveStatus
+        if ($UserMode) {
+            Write-UserFriendlyStatus -ActionLabel "Status" -StatusItems $liveStatus
+        } else {
+            Write-StackStatus -ActionLabel "Status" -StatusItems $liveStatus
+        }
     }
     "stop" {
         $stopPlan = @(
@@ -464,7 +532,13 @@ switch ($Action) {
         }
         Write-Output ""
         $liveStatus = Get-StackLiveStatus -State $null
-        Write-StackStatus -ActionLabel "Status nach Stop" -StatusItems $liveStatus
+        if ($UserMode) {
+            Write-UserFriendlyStatus -ActionLabel "Status nach Stop" -StatusItems $liveStatus
+            Write-Output ""
+            Write-Output "Hinweis: Stop beendet nur Dienste, die vom Stack-Launcher gestartet wurden."
+        } else {
+            Write-StackStatus -ActionLabel "Status nach Stop" -StatusItems $liveStatus
+        }
     }
 }
 

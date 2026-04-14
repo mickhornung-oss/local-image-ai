@@ -540,3 +540,31 @@
 - `Foto` wird jetzt klarer als realistische Wahl fuer natuerliche Gesichter und Szenen beschrieben.
 - `Anime` wird jetzt klarer als stilisierte Wahl fuer Figuren und Anime-Look beschrieben.
 - Keine Checkpointnamen und keine technische Modellsprache im sichtbaren Nutzerpfad.
+
+## V20 Anime-Stilstrategie (ohne neue Pipeline)
+
+### Aktueller Produktstand
+- `photo_standard` bleibt der robustere Pfad fuer hohe Motivtreue.
+- `anime_standard` bleibt brauchbar fuer freie stilisierte Anime-Bilder.
+- bekannte Restgrenze bei enger Motivtreue:
+  - Motiv-/Pose-/Kompositionsdrift
+  - gelegentliche Mehrfigur-/Collage-Tendenz
+  - nur begrenzt promptseitig eindaemmbar
+
+### Produktlinie ab V20
+- im Hauptprodukt bleibt Anime klar als Stilmodus:
+  - stilisierte Darstellung statt harte Motivkopie
+- enge Motivtreue `Foto -> Anime` wird nicht als Standardversprechen verkauft
+- ein spaeterer motivtreuer Anime-Ausbau wird nur als getrennter Spezialpfad gedacht
+
+### Empfohlener spaeterer Ausbaupfad
+- nicht im laufenden Hauptpfad mischen
+- motivtreuer Anime nur mit eigener klarer Strategie, zum Beispiel:
+  - separater kontrollierter Zusatzmodus
+  - oder eigener spezialisierter Modellpfad mit enger Geltung
+- erst nach engem Vergleichssatz mit festen Seeds und klarer Erfolgsgrenze
+
+### V20 bewusst nicht umgesetzt
+- kein Modellwechsel
+- keine neue Anime-Pipeline
+- kein neuer sichtbarer Modus im Basismodus

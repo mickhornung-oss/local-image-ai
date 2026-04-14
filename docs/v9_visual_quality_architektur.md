@@ -210,3 +210,74 @@
   - Seitenhintergruende, Kartenflaechen und Eingabebereiche wurden kontrolliert heller gezogen, ohne die dunkle Grundwelt zu verlassen
   - Kartenränder, Trenner und Sekundaertexte sind jetzt etwas klarer lesbar und wirken weniger bunkerartig
   - Basismodus bleibt ruhig und freundlich, waehrend der Expertenbereich dieselbe Lesbarkeitsverbesserung in einer weiter technischen Warmton-Fassung nutzt
+
+### V9.8 Ergebniszentrale Ruhiger Gefuehrt
+- Fokus:
+  - Ergebnisnutzung klarer statt Karten-/Textmischung
+  - Vorschau und Download bewusst trennen
+  - sichtbare Dopplungen in Ergebnishinweisen reduzieren
+- real umgesetzt:
+  - Ergebnisbilder oeffnen jetzt gross als Overlay-Vorschau im Browser (`Vorschau` oder Bildklick)
+  - Download bleibt als eigene Aktion getrennt sichtbar
+  - Ergebnis-Toolbar wurde sprachlich entdoppelt (ruhiger Export-Hinweis statt mehrfacher Pfadwiederholung)
+  - Speicherstatus spricht jetzt konsequent in Produktbegriffen (`Haupt-Output`, `Nutzer-Exporte`)
+
+### V9.9 Finaler Produkt-Poliergang (V17)
+- Fokus:
+  - letzte sichtbare Unruhe zwischen Basis-/Expertenflaechen reduzieren
+  - Labels und Statussprache angleichen, ohne den technischen Charakter zu verlieren
+- real umgesetzt:
+  - Experten-Headertexte und Run-Kopien sprachlich gestrafft und vereinheitlicht
+  - konsistente Expertenbezeichnung fuer Ablaufkarten (`Readiness, Start, Ergebnis`)
+  - `Aktuelles Ergebnis` und `Ergebniszentrale` im Expertenmodus auf dieselbe Kartenoptik gezogen
+  - Ergebnisvorschau-Overlay im Expertenmodus visuell an die Expertenfarbwelt angeglichen
+  - Ergebnislisten-Status auf ruhige Produktsprache nachgezogen (`Ergebnisse` statt uneinheitlicher Klammerform)
+- bewusst nicht Teil:
+  - keine neue Interaktionslogik
+  - keine neue Ergebnislogik
+  - keine Pipeline- oder Modellanpassung
+
+### V9.10 Galerie-Komfort und Vorschau-Navigation (V18)
+- Fokus:
+  - Ergebniszentrale als zusammenhaengende Galerie erfahrbar machen
+  - Vorschau, Download und Wiederladen in die KI klar verknuepfen
+- real umgesetzt:
+  - Grossvorschau besitzt jetzt klare Navigation (`Vorheriges`, `Naechstes`, `Schliessen`)
+  - Tastatursteuerung in der Vorschau (`Pfeil links/rechts`, `Escape`) wurde ergaenzt
+  - Vorschau-Meta zeigt die aktuelle Position (`Bild X von Y`) fuer ruhige Orientierung
+  - neue Ergebnisaktion `Als Eingabebild laden` ist in Karten und Vorschau verfuegbar
+  - die Aktion bleibt in derselben UI-Welt und fuehrt nicht in eine separate Unteransicht
+- bewusst nicht Teil:
+  - kein visueller Komplettumbau
+  - keine neue Datenhaltung
+  - keine neue Renderlogik
+
+### V9.11 Produktfluss Im Basismodus Neu Geordnet (V19)
+- Fokus:
+  - Hauptflaeche auf wenige klare Kernaufgaben reduzieren
+  - Spezialpfade sichtbar nach hinten trennen
+  - Text- und Bildfluss enger verbinden
+- real umgesetzt:
+  - Taskraster im Basismodus zeigt nur noch Text-KI plus die drei allgemeinen Bildaufgaben
+  - Expertenmodus wurde als `Erweitert / Experimental` sprachlich klarer benannt
+  - im Text-KI-Block gibt es jetzt eine direkte Aktion `Als Bildprompt verwenden`
+  - bei `Bild veraendern` und `Bereich im Bild aendern` steht die Eingabebild-/Maskenflaeche vor dem Promptblock
+- bewusst nicht Teil:
+  - keine neue Interaktionsengine
+  - keine neue Renderlogik
+  - kein Design-Relaunch ausserhalb der bestehenden Struktur
+
+### V9.12 Produktschnitt 2.0 Flow-Polish (V20.1)
+- Fokus:
+  - Hauptfluss fuer normale Nutzer auf 5 Aufgaben schliessen
+  - `Bild anpassen` im Arbeitsfluss klarer machen
+  - Text- zu Bildfluss ohne Copy-Paste-Reibung nachziehen
+- real umgesetzt:
+  - Basismodus zeigt jetzt zusaetzlich `Neue Szene mit derselben Person` als klar getrennten Hauptweg
+  - `Bild anpassen` hat am Prompt-Block eine direkte aktive Eingabebild-Vorschau, damit Bildbasis und Prompt zusammenliegen
+  - Text-KI-Antworten koennen pro Zielpfad uebernommen werden (`Neues Bild erstellen`, `Bild anpassen`, `Bereich im Bild aendern`)
+  - Ergebnislabels und Statussprache wurden auf konsistente Produktbegriffe gezogen
+- bewusst nicht Teil:
+  - keine neue Bild-/Textlogik
+  - keine neue Modelllogik
+  - kein Layout-Neubau ausserhalb der bestehenden Kartenstruktur

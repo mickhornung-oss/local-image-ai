@@ -1,0 +1,13 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "model_alias": "my-local-python-model",
+  "model_path": "C:\\path\\to\\your-model.gguf",
+  "n_ctx": 4096,
+  "max_tokens": 700,
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "file_context_max_chars": 24000,
+  "selection_max_chars": 12000,
+  "traceback_max_chars": 8000
+}

@@ -1,0 +1,26 @@
+{
+  "series_id": "identity_research_v1",
+  "description": "Erste faire 4er-Testserie fuer isolierte Single-Reference-Identity-Research-Vergleiche.",
+  "cases": [
+    {
+      "case_id": "portrait_three_quarter",
+      "title": "Portrait mit leichter Kopfwendung",
+      "prompt": "same person, three-quarter portrait, slight head turn, natural daylight, realistic photo"
+    },
+    {
+      "case_id": "upper_body_clothing",
+      "title": "Halber Oberkoerper mit anderer Kleidung",
+      "prompt": "same person, half-body portrait, wearing a dark green jacket, indoor natural light, realistic photo"
+    },
+    {
+      "case_id": "new_scene_background",
+      "title": "Neue Szene mit ruhigem Hintergrund",
+      "prompt": "same person in a quiet bookstore aisle, realistic photo, candid composition"
+    },
+    {
+      "case_id": "stronger_perspective",
+      "title": "Staerkere Perspektive und Kopfhaltung",
+      "prompt": "same person, closer camera perspective, looking slightly down toward the camera, realistic portrait photo"
+    }
+  ]
+}

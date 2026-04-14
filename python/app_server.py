@@ -5,10 +5,13 @@ import itertools
 import json
 import mimetypes
 import os
+import re
 import secrets
 import shutil
+import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default as email_policy_default
@@ -25,14 +28,106 @@ from comfy_client import ComfyClient, ComfyClientError
 from identity_transfer_adapter import build_identity_transfer_adapter_state
 from multi_reference_adapter import build_multi_reference_adapter_state
 from PIL import Image, UnidentifiedImageError
+try:
+    import text_chat_store as chat_store
+except ModuleNotFoundError:
+    from python import text_chat_store as chat_store
+
+try:
+    import text_chat_payloads as chat_payloads
+except ModuleNotFoundError:
+    from python import text_chat_payloads as chat_payloads
+
+try:
+    import text_chat_requests as chat_requests
+except ModuleNotFoundError:
+    from python import text_chat_requests as chat_requests
+
+try:
+    import text_chat_responses as chat_responses
+except ModuleNotFoundError:
+    from python import text_chat_responses as chat_responses
+
+try:
+    import text_chat_service_orchestration as chat_text_service
+except ModuleNotFoundError:
+    from python import text_chat_service_orchestration as chat_text_service
+
+try:
+    import app_status
+except ModuleNotFoundError:
+    from python import app_status
+
+try:
+    import multi_reference_status
+except ModuleNotFoundError:
+    from python import multi_reference_status
+
+try:
+    import identity_status
+except ModuleNotFoundError:
+    from python import identity_status
+
+try:
+    import identity_generate_flow
+except ModuleNotFoundError:
+    from python import identity_generate_flow
+
+try:
+    import identity_generate_results
+except ModuleNotFoundError:
+    from python import identity_generate_results
+
+try:
+    import image_input_validation
+except ModuleNotFoundError:
+    from python import image_input_validation
+
+try:
+    import upload_store
+except ModuleNotFoundError:
+    from python import upload_store
+
+try:
+    import result_output
+except ModuleNotFoundError:
+    from python import result_output
+
+try:
+    import generate_endpoint_flow
+except ModuleNotFoundError:
+    from python import generate_endpoint_flow
+
+try:
+    import general_generate_flow
+except ModuleNotFoundError:
+    from python import general_generate_flow
+
+try:
+    import app_paths
+except ModuleNotFoundError:
+    from python import app_paths
+
+try:
+    import app_request_utils
+except ModuleNotFoundError:
+    from python import app_request_utils
 from render_identity_transfer import (
     IDENTITY_TRANSFER_MODE,
     build_identity_transfer_runtime_state,
     run_identity_transfer,
 )
+from render_identity_transfer_mask_hybrid import (
+    IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+    build_identity_transfer_mask_hybrid_runtime_state,
+    run_identity_transfer_mask_hybrid,
+)
 from render_text2img import (
     DEFAULT_BASE_URL,
+    DEFAULT_CFG,
     DEFAULT_DENOISE_STRENGTH,
+    DEFAULT_NEGATIVE_PROMPT,
+    DEFAULT_STEPS,
     MAX_DENOISE_STRENGTH,
     MIN_DENOISE_STRENGTH,
     INPUT_IMAGE_EXTENSIONS,
@@ -46,6 +141,12 @@ from render_identity_reference import (
     IDENTITY_REFERENCE_MODE,
     build_identity_runtime_state,
     run_identity_reference,
+)
+from render_identity_research import (
+    IDENTITY_RESEARCH_DEFAULT_PROVIDER,
+    IDENTITY_RESEARCH_MODE,
+    build_identity_research_runtime_state,
+    run_identity_research,
 )
 from render_identity_multi_reference import (
     IDENTITY_MULTI_REFERENCE_MODE,
@@ -67,7 +168,10 @@ MULTI_REFERENCE_ROUTE_PREFIX = "/multi-reference/"
 IDENTITY_TRANSFER_ROUTE_PREFIX = "/identity-transfer/"
 RESULT_FILE_ROUTE_PREFIX = "/results/files/"
 RESULT_DOWNLOAD_ROUTE_PREFIX = "/results/download/"
+EXPORT_FILE_ROUTE_PREFIX = "/exports/files/"
 RESULT_LIST_PATH = "/results"
+RESULT_EXPORT_PATH = "/results/export"
+RESULT_DELETE_PATH = "/results/delete"
 INPUT_IMAGE_UPLOAD_PATH = "/input-image"
 INPUT_IMAGE_RESET_PATH = "/input-image/current"
 REFERENCE_IMAGE_UPLOAD_PATH = "/identity-reference-image"
@@ -83,21 +187,57 @@ IDENTITY_TRANSFER_ROLE_RESET_PREFIX = "/identity-transfer-role-image/"
 IDENTITY_TRANSFER_STATUS_PATH = "/identity-transfer/status"
 IDENTITY_TRANSFER_READINESS_PATH = "/identity-transfer/readiness"
 IDENTITY_TRANSFER_GENERATE_PATH = "/identity-transfer/generate"
+IDENTITY_TRANSFER_MASK_HYBRID_READINESS_PATH = "/identity-transfer/mask-hybrid/readiness"
+IDENTITY_TRANSFER_MASK_HYBRID_GENERATE_PATH = "/identity-transfer/mask-hybrid/generate"
 IDENTITY_MULTI_REFERENCE_GENERATE_PATH = "/identity-multi-reference/generate"
 IDENTITY_REFERENCE_GENERATE_PATH = "/identity-reference/generate"
 IDENTITY_REFERENCE_READINESS_PATH = "/identity-reference/readiness"
+IDENTITY_RESEARCH_GENERATE_PATH = "/experimental/identity-research/generate"
+IDENTITY_RESEARCH_READINESS_PATH = "/experimental/identity-research/readiness"
 MASK_IMAGE_RESET_PATH = "/mask-image/current"
 MASK_IMAGE_EDITOR_PATH = "/mask-image/editor"
 TEXT_SERVICE_PROMPT_TEST_PATH = "/text-service/prompt-test"
+TEXT_CHAT_SLOTS_PATH = "/text-service/chats"
+TEXT_CHAT_CREATE_PATH = "/text-service/chats/new"
 UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 RESULTS_DEFAULT_LIMIT = 20
 RESULTS_MAX_LIMIT = 100
 RESULT_RETENTION_DEFAULT = 50
 RESULT_RETENTION_ENV_VAR = "LOCAL_IMAGE_APP_RESULT_RETENTION"
+RESULT_TEMP_STALE_SECONDS = 10 * 60
+MANAGED_RESULT_ID_PATTERN = re.compile(r"^result-\d{14}-[0-9a-f]{8}$")
+MANAGED_RESULT_TMP_FILE_PATTERN = re.compile(r"^\.result-\d{14}-[0-9a-f]{8}\.(png|jpg|jpeg|webp)\.tmp$")
 TEXT_SERVICE_CONFIG_PATH = repo_root() / "config" / "text_service.json"
+TEXT_MODEL_SWITCH_STATE_PATH = (repo_root() / "vendor" / "text_runner" / "logs" / "model_switch.state.json").resolve()
 TEXT_SERVICE_PROBE_TIMEOUT = 2.0
-TEXT_SERVICE_PROMPT_TIMEOUT = 60.0
+TEXT_SERVICE_PROMPT_TIMEOUT = 720.0
 TEXT_SERVICE_PROMPT_MAX_LENGTH = 2000
+TEXT_RUNNER_START_TIMEOUT_SECONDS = 300.0
+TEXT_RUNNER_STOP_TIMEOUT_SECONDS = 15.0
+TEXT_RUNNER_CONTEXT_SIZE = 4096
+TEXT_RUNNER_SCRIPT_PATH = (repo_root() / "scripts" / "run_text_runner.ps1").resolve()
+TEXT_CHAT_SLOT_COUNT = 5
+TEXT_CHAT_MAX_VISIBLE_MESSAGES = 80
+TEXT_CHAT_CONTEXT_RECENT_MESSAGES = 6
+TEXT_CHAT_SUMMARY_MAX_CHARACTERS = 900
+TEXT_CHAT_TITLE_MAX_LENGTH = 80
+TEXT_WORK_MODE_WRITING = "writing"
+TEXT_WORK_MODE_REWRITE = "rewrite"
+TEXT_WORK_MODE_IMAGE = "image_prompt"
+VALID_TEXT_WORK_MODES = {
+    TEXT_WORK_MODE_WRITING,
+    TEXT_WORK_MODE_REWRITE,
+    TEXT_WORK_MODE_IMAGE,
+}
+TEXT_MODEL_PROFILE_STANDARD = "standard"
+TEXT_MODEL_PROFILE_STRONG_WRITING = "strong_writing"
+TEXT_MODEL_PROFILE_MULTILINGUAL = "multilingual"
+VALID_TEXT_MODEL_PROFILE_IDS = {
+    TEXT_MODEL_PROFILE_STANDARD,
+    TEXT_MODEL_PROFILE_STRONG_WRITING,
+    TEXT_MODEL_PROFILE_MULTILINGUAL,
+}
+NEGATIVE_PROMPT_MAX_LENGTH = 2000
 VALID_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 VALID_UPLOAD_FORMATS = {
     "PNG": (".png", "image/png"),
@@ -105,6 +245,62 @@ VALID_UPLOAD_FORMATS = {
     "WEBP": (".webp", "image/webp"),
 }
 MAX_MULTI_REFERENCE_SLOTS = 3
+ANIME_MOTIF_TUNING_CHECKPOINTS = {
+    "anime_standard",
+    "animagine-xl-4.0-opt.safetensors",
+}
+ANIME_MOTIF_TUNING_CFG = 6.2
+ANIME_MOTIF_TUNING_STEPS = 24
+ANIME_MOTIF_TUNING_NEGATIVE_SUFFIX = (
+    "duplicate person, multiple characters, chaotic composition, distorted perspective, cluttered background"
+)
+PHOTO_INPAINT_CFG = 5.6
+PHOTO_INPAINT_STEPS = 28
+ANIME_INPAINT_CFG = 6.0
+ANIME_INPAINT_STEPS = 28
+PHOTO_INPAINT_CLOTHING_CFG = 5.1
+PHOTO_INPAINT_CLOTHING_STEPS = 32
+ANIME_INPAINT_CLOTHING_CFG = 5.8
+ANIME_INPAINT_CLOTHING_STEPS = 32
+PHOTO_INPAINT_CLOTHING_FORM_CFG = 4.8
+PHOTO_INPAINT_CLOTHING_FORM_STEPS = 30
+ANIME_INPAINT_CLOTHING_FORM_CFG = 5.5
+ANIME_INPAINT_CLOTHING_FORM_STEPS = 30
+INPAINT_CLOTHING_MASK_RATIO_THRESHOLD = 0.08
+INPAINT_CLOTHING_DEFAULT_DENOISE = 0.64
+INPAINT_CLOTHING_FORM_DEFAULT_DENOISE = 0.60
+INPAINT_CLOTHING_GROW_MASK_BY = 0
+INPAINT_LOCAL_EDIT_PROMPT_SUFFIX = (
+    "precise local inpainting edit, only change inside the mask, keep unmasked areas unchanged, preserve the same person, same photo, same composition, same camera framing, preserve realistic texture and edges, make a clean detailed replacement inside the mask"
+)
+INPAINT_CLOTHING_EDIT_PROMPT_SUFFIX = (
+    "the masked area is clothing or fabric, make a coherent garment replacement inside the mask, preserve the original garment shape, preserve the original neckline, preserve the original coverage and silhouette, preserve realistic folds, seams and fabric texture, change only the masked clothing region"
+)
+INPAINT_CLOTHING_FORM_EDIT_PROMPT_SUFFIX = (
+    "the masked area is existing clothing, keep the same clothing shape, same neckline, same hemline, same coverage, same silhouette and same garment structure, only change color, material, surface finish or fabric texture inside the mask, preserve realistic folds, seams and edges"
+)
+EDIT_IMAGE_PRESERVATION_PROMPT_SUFFIX = (
+    "image edit based on the provided source image, keep the same subject, same composition, same camera framing, preserve the original image structure unless the prompt asks for a small change"
+)
+EDIT_IMAGE_PRESERVATION_NEGATIVE_SUFFIX = (
+    "different person, different face, different composition, different camera angle, different pose, full scene change, background replacement"
+)
+INPAINT_LOCALITY_NEGATIVE_SUFFIX = (
+    "global scene change, different camera angle, different composition, full body replacement, background replacement, extra people, flat gray patch, blank masked area, amorphous blob, smeared clothing, melted object, broken edges"
+)
+INPAINT_CLOTHING_NEGATIVE_SUFFIX = (
+    "scarf, bib, armor plate, floating fabric, detached collar, blanket shape, random cloth blob, melted neckline, warped torso, broken garment edges, turtleneck, high collar, chest plate"
+)
+INPAINT_CLOTHING_FORM_NEGATIVE_SUFFIX = (
+    "new garment shape, different blouse shape, different neckline, different collar, scarf, bib, armor plate, apron shape, poncho shape, blanket shape, chest plate, detached fabric, folded bib, warped hemline"
+)
+EDIT_DENOISE_DEFAULT = 0.25
+EDIT_DENOISE_MAX = 0.55
+EDIT_STEPS = 16
+EDIT_WAIT_TIMEOUT_SECONDS = 360
+INPAINT_DENOISE_DEFAULT = 0.58
+INPAINT_DENOISE_MAX = 0.80
+MASK_BINARY_THRESHOLD = 96
 IDENTITY_TRANSFER_ROLES = (
     "identity_head_reference",
     "target_body_image",
@@ -128,7 +324,15 @@ IDENTITY_REFERENCE_SERVICE_UNAVAILABLE_BLOCKERS = {
     "identity_nodes_unreachable",
     "identity_nodes_invalid",
     "identity_nodes_missing",
+    "pulid_v11_workflow_missing",
+    "pulid_v11_workflow_invalid",
+    "pulid_v11_custom_node_missing",
+    "pulid_v11_models_missing",
+    "pulid_v11_nodes_unreachable",
+    "pulid_v11_nodes_invalid",
+    "pulid_v11_nodes_missing",
 }
+TEXT_MODEL_SWITCH_LOCK = threading.Lock()
 
 
 def utc_now_iso() -> str:
@@ -171,52 +375,24 @@ def result_root() -> Path:
     return (repo_root() / "data" / "results").resolve()
 
 
-class UploadRequestError(Exception):
-    def __init__(
-        self,
-        *,
-        status_code: HTTPStatus,
-        error_type: str,
-        blocker: str,
-        message: str,
-    ) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.error_type = error_type
-        self.blocker = blocker
-        self.message = message
+def export_root() -> Path:
+    return (repo_root() / "data" / "exports").resolve()
 
 
-class ResultStoreError(Exception):
-    def __init__(
-        self,
-        *,
-        status_code: HTTPStatus,
-        error_type: str,
-        blocker: str,
-        message: str,
-    ) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.error_type = error_type
-        self.blocker = blocker
-        self.message = message
+def text_chat_db_path() -> Path:
+    return (repo_root() / "data" / "text_chats.sqlite3").resolve()
+
+
+def repo_relative_path(path: Path) -> str:
+    return app_paths.repo_relative_path(path, repo_root=repo_root())
+
+
+UploadRequestError = image_input_validation.UploadRequestError
+ResultStoreError = result_output.ResultStoreError
 
 
 def read_json_file_detail(path: Path) -> tuple[dict | None, str | None]:
-    if not path.exists():
-        return None, "missing"
-
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None, "invalid_json"
-    except OSError:
-        return None, "read_failed"
-
-    if not isinstance(payload, dict):
-        return None, "invalid_payload"
-    return payload, None
+    return app_request_utils.read_json_file_detail(path)
 
 
 def fetch_json_detail(url: str, *, timeout: float) -> tuple[dict | None, str | None]:
@@ -288,6 +464,7 @@ def load_text_service_config_state() -> tuple[bool, dict | None, str | None]:
     service_name = payload.get("service_name")
     model_status = payload.get("model_status")
     runner_type = payload.get("runner_type")
+    runner_port = payload.get("runner_port")
     model_path = payload.get("model_path")
 
     if enabled is not True:
@@ -296,10 +473,13 @@ def load_text_service_config_state() -> tuple[bool, dict | None, str | None]:
         return False, None, "config_invalid"
     if not isinstance(port, int) or port < 1 or port > 65535:
         return False, None, "config_invalid"
+    if not isinstance(runner_port, int) or runner_port < 1 or runner_port > 65535:
+        return False, None, "config_invalid"
 
     return True, {
         "host": "127.0.0.1",
         "port": port,
+        "runner_port": runner_port,
         "service_name": service_name.strip() if isinstance(service_name, str) and service_name.strip() else None,
         "model_status": model_status.strip() if isinstance(model_status, str) and model_status.strip() else None,
         "runner_type": runner_type.strip() if isinstance(runner_type, str) and runner_type.strip() else None,
@@ -307,91 +487,220 @@ def load_text_service_config_state() -> tuple[bool, dict | None, str | None]:
     }, None
 
 
+def load_text_service_config_payload() -> tuple[dict | None, str | None]:
+    payload, error = read_json_file_detail(TEXT_SERVICE_CONFIG_PATH)
+    if error is not None:
+        return None, error
+    if not isinstance(payload, dict):
+        return None, "invalid_payload"
+    return payload, None
+
+
+def write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def update_text_service_config_payload(*, model_path: str, model_status: str | None = None) -> dict:
+    payload, payload_error = load_text_service_config_payload()
+    if payload_error is not None or payload is None:
+        raise OSError(f"text_service_config_unavailable:{payload_error or 'unknown'}")
+    payload["model_path"] = model_path
+    if isinstance(model_status, str) and model_status.strip():
+        payload["model_status"] = model_status.strip()
+    write_json_atomic(TEXT_SERVICE_CONFIG_PATH, payload)
+    return payload
+
+
+def read_text_model_switch_state() -> dict | None:
+    payload, error = read_json_file_detail(TEXT_MODEL_SWITCH_STATE_PATH)
+    if error is not None or payload is None:
+        return None
+    return payload
+
+
+def write_text_model_switch_state(payload: dict) -> None:
+    write_json_atomic(TEXT_MODEL_SWITCH_STATE_PATH, payload)
+
+
+def clear_text_model_switch_state() -> None:
+    try:
+        if TEXT_MODEL_SWITCH_STATE_PATH.exists():
+            TEXT_MODEL_SWITCH_STATE_PATH.unlink()
+    except OSError:
+        pass
+
+
+def find_listener_pid(local_port: int) -> int | None:
+    script = (
+        f"$listener = Get-NetTCPConnection -LocalPort {int(local_port)} -State Listen -ErrorAction SilentlyContinue | "
+        "Select-Object -First 1 -ExpandProperty OwningProcess; "
+        "if ($null -ne $listener) { Write-Output $listener }"
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    output = (completed.stdout or "").strip()
+    if not output:
+        return None
+    try:
+        return int(output.splitlines()[-1].strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def stop_text_runner_process(runner_port: int) -> tuple[bool, str | None]:
+    pid = find_listener_pid(runner_port)
+    if pid is None:
+        return True, None
+    try:
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    if completed.returncode not in {0, 128}:
+        stderr_text = (completed.stderr or completed.stdout or "").strip()
+        return False, stderr_text or "taskkill_failed"
+    deadline = time.time() + TEXT_RUNNER_STOP_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if find_listener_pid(runner_port) is None:
+            return True, None
+        time.sleep(0.5)
+    return False, "runner_stop_timeout"
+
+
+def start_text_runner_process() -> tuple[dict | None, str | None]:
+    payload, payload_error = load_text_service_config_payload()
+    if payload_error is not None or payload is None:
+        return None, payload_error or "text_service_config_unavailable"
+
+    runner_binary_value = payload.get("runner_binary_path")
+    model_path_value = payload.get("model_path")
+    runner_port = payload.get("runner_port")
+    runner_host = payload.get("runner_host")
+
+    if not isinstance(runner_binary_value, str) or not runner_binary_value.strip():
+        return None, "runner_binary_missing"
+    if not isinstance(model_path_value, str) or not model_path_value.strip():
+        return None, "model_missing"
+    if not isinstance(runner_port, int):
+        return None, "runner_port_invalid"
+    if not isinstance(runner_host, str) or not runner_host.strip():
+        runner_host = "127.0.0.1"
+
+    runner_binary_path = Path(runner_binary_value.strip())
+    if not runner_binary_path.is_absolute():
+        runner_binary_path = (repo_root() / runner_binary_path).resolve()
+    model_path = Path(model_path_value.strip())
+    if not model_path.is_absolute():
+        model_path = (repo_root() / model_path).resolve()
+
+    if not runner_binary_path.exists():
+        return None, "runner_binary_missing"
+    if not model_path.exists():
+        return None, "model_missing"
+
+    logs_root = (repo_root() / "vendor" / "text_runner" / "logs").resolve()
+    logs_root.mkdir(parents=True, exist_ok=True)
+    stdout_log_path = logs_root / "llama-server.stdout.log"
+    stderr_log_path = logs_root / "llama-server.stderr.log"
+
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        stdout_handle = open(stdout_log_path, "a", encoding="utf-8")
+        stderr_handle = open(stderr_log_path, "a", encoding="utf-8")
+    except OSError as exc:
+        return None, str(exc)
+
+    try:
+        process = subprocess.Popen(
+            [
+                str(runner_binary_path),
+                "--model",
+                str(model_path),
+                "--host",
+                runner_host.strip() or "127.0.0.1",
+                "--port",
+                str(runner_port),
+                "--ctx-size",
+                str(TEXT_RUNNER_CONTEXT_SIZE),
+            ],
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            creationflags=creationflags,
+        )
+    except OSError as exc:
+        stdout_handle.close()
+        stderr_handle.close()
+        return None, str(exc)
+
+    deadline = time.time() + TEXT_RUNNER_START_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        runner_payload, runner_error = fetch_json_detail(
+            f"http://127.0.0.1:{runner_port}/v1/models",
+            timeout=TEXT_SERVICE_PROBE_TIMEOUT,
+        )
+        if runner_error is None and runner_payload is not None:
+            stdout_handle.close()
+            stderr_handle.close()
+            return {
+                "status": "started",
+                "port": runner_port,
+                "pid": process.pid,
+                "url": f"http://127.0.0.1:{runner_port}",
+                "runner_binary_path": str(runner_binary_path),
+                "model_path": str(model_path),
+            }, None
+        if process.poll() is not None:
+            stdout_handle.close()
+            stderr_handle.close()
+            return None, f"runner_exited_{process.returncode}"
+        time.sleep(0.5)
+
+    try:
+        process.kill()
+    except OSError:
+        pass
+    stdout_handle.close()
+    stderr_handle.close()
+    return None, "runner_start_timeout"
+
+
 def collect_text_service_state() -> dict:
     configured, config, config_error = load_text_service_config_state()
-    state = {
-        "text_service_configured": configured,
-        "text_service_reachable": False,
-        "text_service_error": config_error,
-        "text_service": {
-            "service_name": None,
-            "service_mode": None,
-            "runner_type": None,
-            "runner_present": None,
-            "runner_reachable": None,
-            "runner_startable": None,
-            "stub_mode": None,
-            "inference_available": None,
-            "model_status": None,
-            "model_configured": None,
-            "model_present": None,
-        },
-    }
-
-    if not configured or config is None:
-        return state
-
-    base_url = f"http://{config['host']}:{config['port']}"
-    health_payload, health_error = fetch_json_detail(f"{base_url}/health", timeout=TEXT_SERVICE_PROBE_TIMEOUT)
-    if health_error is not None or health_payload is None:
-        state["text_service_error"] = "unreachable" if health_error in {"unreachable", "timeout"} else "invalid_health"
-        state["text_service"]["service_name"] = config["service_name"]
-        state["text_service"]["runner_type"] = config["runner_type"]
-        state["text_service"]["model_status"] = config["model_status"]
-        state["text_service"]["model_configured"] = config["model_configured"]
-        return state
-
-    service_name = health_payload.get("service")
-    if not isinstance(service_name, str) or not service_name.strip():
-        state["text_service_error"] = "invalid_health"
-        return state
-
-    expected_service_name = config["service_name"]
-    if expected_service_name and service_name.strip() != expected_service_name:
-        state["text_service_error"] = "unexpected_service"
-        return state
-
-    state["text_service_reachable"] = True
-    state["text_service_error"] = None
-    state["text_service"] = {
-        "service_name": service_name.strip(),
-        "service_mode": health_payload.get("service_mode") if isinstance(health_payload.get("service_mode"), str) else None,
-        "runner_type": health_payload.get("runner_type") if isinstance(health_payload.get("runner_type"), str) else config["runner_type"],
-        "runner_present": health_payload.get("runner_present") if isinstance(health_payload.get("runner_present"), bool) else None,
-        "runner_reachable": health_payload.get("runner_reachable") if isinstance(health_payload.get("runner_reachable"), bool) else None,
-        "runner_startable": health_payload.get("runner_startable") if isinstance(health_payload.get("runner_startable"), bool) else None,
-        "stub_mode": health_payload.get("stub_mode") is True,
-        "inference_available": health_payload.get("inference_available") if isinstance(health_payload.get("inference_available"), bool) else None,
-        "model_status": health_payload.get("model_status") if isinstance(health_payload.get("model_status"), str) else config["model_status"],
-        "model_configured": health_payload.get("model_configured") if isinstance(health_payload.get("model_configured"), bool) else config["model_configured"],
-        "model_present": health_payload.get("model_present") if isinstance(health_payload.get("model_present"), bool) else None,
-    }
-
-    info_payload, info_error = fetch_json_detail(f"{base_url}/info", timeout=TEXT_SERVICE_PROBE_TIMEOUT)
-    if info_error is None and info_payload is not None:
-        if isinstance(info_payload.get("service_mode"), str) and info_payload.get("service_mode").strip():
-            state["text_service"]["service_mode"] = info_payload.get("service_mode").strip()
-        if isinstance(info_payload.get("runner_type"), str) and info_payload.get("runner_type").strip():
-            state["text_service"]["runner_type"] = info_payload.get("runner_type").strip()
-        if isinstance(info_payload.get("runner_present"), bool):
-            state["text_service"]["runner_present"] = info_payload.get("runner_present")
-        if isinstance(info_payload.get("runner_reachable"), bool):
-            state["text_service"]["runner_reachable"] = info_payload.get("runner_reachable")
-        if isinstance(info_payload.get("runner_startable"), bool):
-            state["text_service"]["runner_startable"] = info_payload.get("runner_startable")
-        state["text_service"]["stub_mode"] = info_payload.get("stub_mode") is True
-        if isinstance(info_payload.get("inference_available"), bool):
-            state["text_service"]["inference_available"] = info_payload.get("inference_available")
-        if isinstance(info_payload.get("model_status"), str) and info_payload.get("model_status").strip():
-            state["text_service"]["model_status"] = info_payload.get("model_status").strip()
-        if isinstance(info_payload.get("model_configured"), bool):
-            state["text_service"]["model_configured"] = info_payload.get("model_configured")
-        if isinstance(info_payload.get("model_present"), bool):
-            state["text_service"]["model_present"] = info_payload.get("model_present")
-    elif info_error is not None:
-        state["text_service_error"] = "info_unavailable"
-
-    return state
+    health_payload = None
+    health_error = None
+    info_payload = None
+    info_error = None
+    if configured and config is not None:
+        base_url = f"http://{config['host']}:{config['port']}"
+        health_payload, health_error = fetch_json_detail(f"{base_url}/health", timeout=TEXT_SERVICE_PROBE_TIMEOUT)
+        if health_error is None and health_payload is not None:
+            info_payload, info_error = fetch_json_detail(f"{base_url}/info", timeout=TEXT_SERVICE_PROBE_TIMEOUT)
+    return app_status.build_text_service_state(
+        configured=configured,
+        config=config,
+        config_error=config_error,
+        model_switch_state=read_text_model_switch_state(),
+        health_payload=health_payload,
+        health_error=health_error,
+        info_payload=info_payload,
+        info_error=info_error,
+    )
 
 
 def normalize_text_service_prompt(value: object) -> tuple[str | None, str | None]:
@@ -406,6 +715,345 @@ def normalize_text_service_prompt(value: object) -> tuple[str | None, str | None
         return None, "prompt_too_long"
 
     return normalized_prompt, None
+
+
+def normalize_text_work_mode(value: object) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, "mode_not_string"
+    normalized = value.strip().lower()
+    if not normalized:
+        return None, None
+    if normalized not in VALID_TEXT_WORK_MODES:
+        return None, "invalid_mode"
+    return normalized, None
+
+
+def normalize_text_model_profile(value: object) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, "model_profile_not_string"
+    normalized = value.strip().lower()
+    if not normalized:
+        return None, None
+    if normalized not in VALID_TEXT_MODEL_PROFILE_IDS:
+        return None, "invalid_model_profile"
+    return normalized, None
+
+
+def list_local_text_model_paths() -> list[Path]:
+    root = (repo_root() / "vendor" / "text_models").resolve()
+    if not root.exists() or not root.is_dir():
+        return []
+    try:
+        return sorted((path.resolve() for path in root.glob("*.gguf") if path.is_file()), key=lambda item: item.name.lower())
+    except OSError:
+        return []
+
+
+def model_path_matches_keywords(path: Path, keywords: tuple[str, ...]) -> bool:
+    normalized_name = path.name.lower()
+    return all(keyword in normalized_name for keyword in keywords)
+
+
+def build_text_model_profiles_state() -> dict:
+    payload, payload_error = load_text_service_config_payload()
+    configured_model_path = None
+    configured_model_name = None
+    if payload_error is None and payload is not None:
+        model_path_value = payload.get("model_path")
+        if isinstance(model_path_value, str) and model_path_value.strip():
+            candidate = repo_root() / model_path_value.strip() if not Path(model_path_value.strip()).is_absolute() else Path(model_path_value.strip())
+            configured_model_path = candidate.resolve()
+            configured_model_name = configured_model_path.name
+
+    available_files = list_local_text_model_paths()
+    text_service_state = collect_text_service_state()
+    runtime_state = text_service_state.get("text_service") if isinstance(text_service_state, dict) else {}
+    runtime_model_status = str(runtime_state.get("model_status") or "").strip().lower()
+    runtime_ready = (
+        text_service_state.get("text_service_reachable") is True
+        and runtime_state.get("inference_available") is True
+        and runtime_model_status == "ready"
+    )
+    switch_state = read_text_model_switch_state() or {}
+    switch_phase = str(switch_state.get("phase") or "").strip().lower()
+    switch_target_profile = str(switch_state.get("target_profile_id") or "").strip().lower() or None
+    switch_error_message = str(switch_state.get("message") or "").strip() or None
+    profile_specs = (
+        {
+            "id": TEXT_MODEL_PROFILE_STANDARD,
+            "label": "Standard",
+            "subtitle": "Schreiben / Prompt-Hilfe",
+            "target_name": "Qwen3-8B",
+            "keyword_groups": (
+                ("qwen3", "8b"),
+                ("qwen2.5", "7b"),
+                ("qwen2_5", "7b"),
+                ("qwen", "7b"),
+            ),
+            "fallback_to_configured": True,
+        },
+        {
+            "id": TEXT_MODEL_PROFILE_STRONG_WRITING,
+            "label": "Starkes Schreiben",
+            "subtitle": "Langes Schreiben",
+            "target_name": "Mistral Small 3.1 24B",
+            "keyword_groups": (("mistral", "small", "24b"),),
+            "fallback_to_configured": False,
+        },
+        {
+            "id": TEXT_MODEL_PROFILE_MULTILINGUAL,
+            "label": "Mehrsprachig",
+            "subtitle": "Uebersetzen / Umformulieren",
+            "target_name": "Gemma 3 12B",
+            "keyword_groups": (("gemma", "3", "12b"),),
+            "fallback_to_configured": False,
+        },
+    )
+
+    direct_profile_matches: dict[str, Path | None] = {}
+    non_fallback_matched_paths: set[Path] = set()
+    for spec in profile_specs:
+        keyword_groups = spec.get("keyword_groups") if isinstance(spec.get("keyword_groups"), tuple) else ()
+        matched_path = None
+        for keywords in keyword_groups:
+            matched_path = next((path for path in available_files if model_path_matches_keywords(path, keywords)), None)
+            if matched_path is not None:
+                break
+        direct_profile_matches[spec["id"]] = matched_path
+        if matched_path is not None:
+            non_fallback_matched_paths.add(matched_path)
+
+    profiles: list[dict] = []
+    current_profile_id = None
+    for spec in profile_specs:
+        resolved_path = direct_profile_matches.get(spec["id"])
+        if (
+            resolved_path is None
+            and spec["fallback_to_configured"]
+            and configured_model_path is not None
+            and configured_model_path.exists()
+            and configured_model_path not in non_fallback_matched_paths
+        ):
+            resolved_path = configured_model_path
+
+        is_current = configured_model_path is not None and resolved_path is not None and configured_model_path == resolved_path
+        status = "prepared"
+        status_label = "Vorbereitet"
+        selectable = True
+        active_for_requests = False
+        available = False
+        if resolved_path is not None and resolved_path.exists():
+            available = True
+            if is_current and runtime_ready:
+                status = "active"
+                status_label = "Aktiv"
+                active_for_requests = True
+            elif switch_phase == "loading" and switch_target_profile == spec["id"]:
+                status = "loading"
+                status_label = "Laedt"
+                selectable = False
+            elif switch_phase == "error" and switch_target_profile == spec["id"]:
+                status = "error"
+                status_label = "Fehler"
+            elif is_current:
+                status = "error"
+                status_label = "Fehler"
+            else:
+                status = "installed"
+                status_label = "Installiert"
+        elif switch_phase == "loading" and switch_target_profile == spec["id"]:
+            status = "loading"
+            status_label = "Laedt"
+            selectable = False
+        elif switch_phase == "error" and switch_target_profile == spec["id"]:
+            status = "error"
+            status_label = "Fehler"
+
+        if is_current:
+            current_profile_id = spec["id"]
+
+        actual_model_name = resolved_path.name if resolved_path is not None and resolved_path.exists() else None
+        profiles.append(
+            {
+                "id": spec["id"],
+                "label": spec["label"],
+                "subtitle": spec["subtitle"],
+                "target_model_name": spec["target_name"],
+                "actual_model_name": actual_model_name,
+                "resolved_model_path": str(resolved_path) if resolved_path is not None and resolved_path.exists() else None,
+                "available": available,
+                "selectable": selectable,
+                "active_for_requests": active_for_requests,
+                "status": status,
+                "status_label": status_label,
+                "error_message": switch_error_message if status == "error" else None,
+                "is_current": is_current,
+            }
+        )
+
+    if current_profile_id is None:
+        current_profile_id = TEXT_MODEL_PROFILE_STANDARD
+
+    return {
+        "profiles": profiles,
+        "current_profile_id": current_profile_id,
+        "current_model_name": configured_model_name,
+        "switch_state": switch_state if switch_state else None,
+    }
+
+
+def get_text_model_profile(profile_id: str | None) -> dict:
+    normalized_profile_id = profile_id if isinstance(profile_id, str) and profile_id in VALID_TEXT_MODEL_PROFILE_IDS else TEXT_MODEL_PROFILE_STANDARD
+    profile_state = build_text_model_profiles_state()
+    for profile in profile_state["profiles"]:
+        if profile["id"] == normalized_profile_id:
+            return profile
+    return profile_state["profiles"][0]
+
+
+def resolve_default_text_model_profile_id() -> str:
+    return TEXT_MODEL_PROFILE_STANDARD
+
+
+def ensure_text_model_profile_active(profile_id: str) -> dict:
+    normalized_profile_id = profile_id if profile_id in VALID_TEXT_MODEL_PROFILE_IDS else TEXT_MODEL_PROFILE_STANDARD
+    with TEXT_MODEL_SWITCH_LOCK:
+        profile = get_text_model_profile(normalized_profile_id)
+        if profile.get("available") is not True:
+            return {
+                "ok": False,
+                "blocker": "text_model_profile_unavailable",
+                "message": "Dieses Modellprofil ist lokal noch nicht verfuegbar.",
+                "profile": profile,
+            }
+
+        target_model_path = profile.get("resolved_model_path")
+        if not isinstance(target_model_path, str) or not target_model_path.strip():
+            return {
+                "ok": False,
+                "blocker": "text_model_profile_unavailable",
+                "message": "Kein lokaler Modellpfad fuer dieses Profil gefunden.",
+                "profile": profile,
+            }
+
+        profile_state = build_text_model_profiles_state()
+        current_profile_id = profile_state.get("current_profile_id")
+        if profile.get("active_for_requests") is True and current_profile_id == normalized_profile_id:
+            clear_text_model_switch_state()
+            return {
+                "ok": True,
+                "changed": False,
+                "profile": profile,
+            }
+
+        configured, config, config_error = load_text_service_config_state()
+        if not configured or config is None:
+            return {
+                "ok": False,
+                "blocker": config_error or "text_service_not_configured",
+                "message": "Die Text-KI-Konfiguration ist nicht verfuegbar.",
+                "profile": profile,
+            }
+
+        write_text_model_switch_state(
+            {
+                "phase": "loading",
+                "target_profile_id": normalized_profile_id,
+                "target_model_name": profile.get("actual_model_name") or profile.get("target_model_name"),
+                "message": "Modell wird geladen.",
+                "updated_at_utc": utc_now_iso(),
+            }
+        )
+
+        try:
+            update_text_service_config_payload(model_path=repo_relative_path(Path(target_model_path)), model_status="configured")
+            stopped_ok, stop_error = stop_text_runner_process(int(config.get("runner_port", 8092)))
+            if not stopped_ok:
+                raise OSError(stop_error or "text_runner_stop_failed")
+            start_payload, start_error = start_text_runner_process()
+            if start_error is not None:
+                raise OSError(start_error)
+        except OSError as exc:
+            write_text_model_switch_state(
+                {
+                    "phase": "error",
+                    "target_profile_id": normalized_profile_id,
+                    "target_model_name": profile.get("actual_model_name") or profile.get("target_model_name"),
+                    "message": str(exc),
+                    "updated_at_utc": utc_now_iso(),
+                }
+            )
+            return {
+                "ok": False,
+                "blocker": "text_model_switch_failed",
+                "message": str(exc),
+                "profile": profile,
+            }
+
+        clear_text_model_switch_state()
+        refreshed_profile = get_text_model_profile(normalized_profile_id)
+        return {
+            "ok": refreshed_profile.get("active_for_requests") is True,
+            "changed": current_profile_id != normalized_profile_id or profile.get("active_for_requests") is not True,
+            "profile": refreshed_profile,
+            "runner_result": start_payload,
+            "blocker": None if refreshed_profile.get("active_for_requests") is True else "text_model_switch_not_ready",
+            "message": None if refreshed_profile.get("active_for_requests") is True else "Das Modellprofil konnte nicht aktiv geladen werden.",
+        }
+
+
+def request_text_service_prompt(
+    prompt: str,
+    *,
+    mode: str | None = None,
+    summary: str | None = None,
+    recent_messages: list[dict[str, str]] | None = None,
+) -> tuple[dict | None, str | None, int | None, str | None, str | None]:
+    configured, config, config_error = load_text_service_config_state()
+    if not configured or config is None:
+        return None, config_error or "text_service_not_configured", None, None, None
+
+    service_name = config["service_name"]
+    model_status = config["model_status"]
+    request_payload: dict[str, object] = {"prompt": prompt}
+    if isinstance(mode, str) and mode.strip():
+        request_payload["mode"] = mode.strip()
+    if isinstance(summary, str) and summary.strip():
+        request_payload["summary"] = summary.strip()
+    if isinstance(recent_messages, list) and recent_messages:
+        request_payload["recent_messages"] = recent_messages
+    response_payload, response_error, response_status = post_json_detail(
+        f"http://{config['host']}:{config['port']}/prompt",
+        timeout=TEXT_SERVICE_PROMPT_TIMEOUT,
+        payload=request_payload,
+    )
+    return response_payload, response_error, response_status, service_name, model_status
+
+
+def should_retry_text_service_prompt_after_switch(
+    *,
+    switch_result: dict | None,
+    response_error: str | None,
+    response_status: int | None,
+) -> bool:
+    if not isinstance(switch_result, dict) or switch_result.get("changed") is not True:
+        return False
+    if response_error in {"unreachable", "timeout"}:
+        return True
+    if response_status in {HTTPStatus.BAD_GATEWAY, HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.GATEWAY_TIMEOUT}:
+        return True
+    return False
+
+
+def normalize_optional_negative_prompt(value: object) -> tuple[str | None, str | None]:
+    return image_input_validation.normalize_optional_negative_prompt(
+        value,
+        max_length=NEGATIVE_PROMPT_MAX_LENGTH,
+    )
 
 
 def build_text_service_prompt_test_response(
@@ -440,41 +1088,34 @@ def probe_comfyui() -> tuple[bool, str | None]:
 
 
 def resolve_identity_reference_status_code(*, error_type: str | None, blocker: str | None) -> HTTPStatus:
-    if error_type == "invalid_request":
-        return HTTPStatus.BAD_REQUEST
-    if error_type == "timeout":
-        return HTTPStatus.GATEWAY_TIMEOUT
-    if blocker in IDENTITY_REFERENCE_SERVICE_UNAVAILABLE_BLOCKERS:
-        return HTTPStatus.SERVICE_UNAVAILABLE
-    if error_type == "api_error":
-        return HTTPStatus.INTERNAL_SERVER_ERROR
-    return HTTPStatus.BAD_REQUEST
+    return identity_status.resolve_identity_reference_status_code(
+        error_type=error_type,
+        blocker=blocker,
+        service_unavailable_blockers=IDENTITY_REFERENCE_SERVICE_UNAVAILABLE_BLOCKERS,
+    )
 
 
 def resolve_identity_multi_reference_status_code(*, error_type: str | None, blocker: str | None) -> HTTPStatus:
-    if blocker == "insufficient_multi_reference_images":
-        return HTTPStatus.BAD_REQUEST
-    if blocker in {"missing_multi_reference_file", "invalid_multi_reference_metadata", "invalid_multi_reference_image", "duplicate_multi_reference_slot"}:
-        return HTTPStatus.INTERNAL_SERVER_ERROR
-    return resolve_identity_reference_status_code(error_type=error_type, blocker=blocker)
+    return identity_status.resolve_identity_multi_reference_status_code(
+        error_type=error_type,
+        blocker=blocker,
+        reference_status_resolver=resolve_identity_reference_status_code,
+    )
 
 
 def resolve_identity_transfer_status_code(*, error_type: str | None, blocker: str | None) -> HTTPStatus:
-    if blocker in {"missing_identity_head_reference", "missing_target_body_image"}:
-        return HTTPStatus.BAD_REQUEST
-    if blocker in {"identity_transfer_store_unavailable", "missing_identity_transfer_file", "invalid_identity_transfer_metadata", "invalid_identity_transfer_image"}:
-        return HTTPStatus.INTERNAL_SERVER_ERROR
-    if error_type == "invalid_request":
-        return HTTPStatus.BAD_REQUEST
-    return HTTPStatus.INTERNAL_SERVER_ERROR
+    return identity_status.resolve_identity_transfer_status_code(
+        error_type=error_type,
+        blocker=blocker,
+    )
 
 
 def resolve_identity_transfer_generate_status_code(*, error_type: str | None, blocker: str | None) -> HTTPStatus:
-    if blocker in {"missing_identity_head_reference", "missing_target_body_image"}:
-        return HTTPStatus.BAD_REQUEST
-    if blocker in {"identity_transfer_store_unavailable", "missing_identity_transfer_file", "invalid_identity_transfer_metadata", "invalid_identity_transfer_image"}:
-        return HTTPStatus.INTERNAL_SERVER_ERROR
-    return resolve_identity_reference_status_code(error_type=error_type, blocker=blocker)
+    return identity_status.resolve_identity_transfer_generate_status_code(
+        error_type=error_type,
+        blocker=blocker,
+        reference_status_resolver=resolve_identity_reference_status_code,
+    )
 
 
 def build_generate_response(
@@ -530,33 +1171,15 @@ def build_busy_response(*, request_id: str | None) -> dict:
 
 
 def build_upload_success_response(payload: dict) -> dict:
-    return {
-        "status": "ok",
-        "ok": True,
-        "image_id": payload["image_id"],
-        "source_type": payload["source_type"],
-        "original_name": payload["original_name"],
-        "stored_name": payload["stored_name"],
-        "mime_type": payload["mime_type"],
-        "size_bytes": payload["size_bytes"],
-        "width": payload["width"],
-        "height": payload["height"],
-        "preview_url": payload["preview_url"],
-    }
+    return upload_store.build_upload_success_response(payload)
 
 
 def build_multi_reference_upload_success_response(payload: dict) -> dict:
-    response_payload = build_upload_success_response(payload)
-    response_payload["slot_index"] = payload["slot_index"]
-    response_payload["created_at"] = payload.get("created_at")
-    return response_payload
+    return upload_store.build_multi_reference_upload_success_response(payload)
 
 
 def build_identity_transfer_upload_success_response(payload: dict) -> dict:
-    response_payload = build_upload_success_response(payload)
-    response_payload["role"] = payload["role"]
-    response_payload["created_at"] = payload.get("created_at")
-    return response_payload
+    return upload_store.build_identity_transfer_upload_success_response(payload)
 
 
 def build_upload_error_response(*, error_type: str, blocker: str, message: str) -> dict:
@@ -578,196 +1201,347 @@ def build_results_error_response(*, error_type: str, blocker: str, message: str)
     }
 
 
+def build_text_chat_error_response(*, error_type: str, blocker: str, message: str) -> dict:
+    return {
+        "status": "error",
+        "ok": False,
+        "error_type": error_type,
+        "blocker": blocker,
+        "message": message,
+    }
+
+
+def text_chat_dir_access_state() -> tuple[bool, str | None]:
+    return chat_store.text_chat_dir_access_state(text_chat_db_path())
+
+
+def text_chat_connection():
+    return chat_store.text_chat_connection(text_chat_db_path())
+
+
+def ensure_text_chat_store() -> None:
+    chat_store.ensure_text_chat_store(text_chat_db_path(), slot_count=TEXT_CHAT_SLOT_COUNT)
+
+
+def normalize_text_chat_slot_index(value: object) -> int:
+    return chat_store.normalize_text_chat_slot_index(value, slot_count=TEXT_CHAT_SLOT_COUNT)
+
+
+def normalize_text_chat_title(value: object) -> tuple[str | None, str | None]:
+    return chat_store.normalize_text_chat_title(value, max_length=TEXT_CHAT_TITLE_MAX_LENGTH)
+
+
+def build_default_text_chat_title(slot_index: int) -> str:
+    return chat_store.build_default_text_chat_title(slot_index)
+
+
+def excerpt_text(value: str, *, limit: int) -> str:
+    normalized = re.sub(r"\s+", " ", str(value or "").strip())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: max(0, limit - 1)].rstrip()}…"
+
+
+def infer_text_chat_language_from_text(value: str) -> str:
+    sample = f" {str(value or '').lower()} "
+    german_score = 0
+    english_score = 0
+    german_tokens = (" der ", " die ", " das ", " und ", " nicht ", " bitte ", " fuer ", " für ", " mit ", " ich ")
+    english_tokens = (" the ", " and ", " please ", " with ", " this ", " that ", " write ", " prompt ", " image ")
+    if re.search(r"[äöüß]", sample):
+        german_score += 2
+    german_score += sum(1 for token in german_tokens if token in sample)
+    english_score += sum(1 for token in english_tokens if token in sample)
+    return "en" if english_score > german_score else "de"
+
+
+def resolve_text_chat_model_label() -> str | None:
+    configured, config, _ = load_text_service_config_state()
+    if not configured or config is None:
+        return None
+    payload, error = read_json_file_detail(TEXT_SERVICE_CONFIG_PATH)
+    if error is None and payload is not None:
+        model_path_value = payload.get("model_path")
+        if isinstance(model_path_value, str) and model_path_value.strip():
+            return Path(model_path_value.strip()).name
+    return config.get("model_status")
+
+
+def get_active_text_chat_slot_index() -> int:
+    return chat_store.get_active_text_chat_slot_index(
+        text_chat_db_path(),
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+    )
+
+
+def set_active_text_chat_slot_index(slot_index: int) -> None:
+    chat_store.set_active_text_chat_slot_index(
+        text_chat_db_path(),
+        slot_index,
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+    )
+
+
+def list_text_chat_messages(slot_index: int, *, limit: int = TEXT_CHAT_MAX_VISIBLE_MESSAGES) -> list[dict]:
+    return chat_store.list_text_chat_messages(
+        text_chat_db_path(),
+        slot_index,
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        limit=limit,
+    )
+
+
+def build_text_chat_summary(messages: list[dict]) -> str | None:
+    return chat_store.build_text_chat_summary(
+        messages,
+        recent_messages_count=TEXT_CHAT_CONTEXT_RECENT_MESSAGES,
+        summary_max_characters=TEXT_CHAT_SUMMARY_MAX_CHARACTERS,
+    )
+
+
+def update_text_chat_slot_metadata(
+    slot_index: int,
+    *,
+    title: str | None = None,
+    summary: str | None = None,
+    language: str | None = None,
+    model_profile: str | None = None,
+    model: str | None = None,
+    created_at: str | None = None,
+    updated_at: str | None = None,
+) -> None:
+    chat_store.update_text_chat_slot_metadata(
+        text_chat_db_path(),
+        slot_index,
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        title=title,
+        summary=summary,
+        language=language,
+        model_profile=model_profile,
+        model=model,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+
+
+def clear_text_chat_slot(slot_index: int) -> None:
+    chat_store.clear_text_chat_slot(
+        text_chat_db_path(),
+        slot_index,
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+    )
+
+
+def create_text_chat_in_slot(slot_index: int, *, title: str | None = None) -> dict:
+    normalized_title = title or build_default_text_chat_title(slot_index)
+    default_profile_id = TEXT_MODEL_PROFILE_STANDARD
+    default_profile = get_text_model_profile(default_profile_id)
+    return chat_store.create_text_chat_in_slot(
+        text_chat_db_path(),
+        slot_index,
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        title=normalized_title,
+        now_iso=utc_now_iso(),
+        default_model_profile=default_profile_id,
+        default_model_label=default_profile.get("actual_model_name") or resolve_text_chat_model_label(),
+        default_visible_messages_limit=TEXT_CHAT_MAX_VISIBLE_MESSAGES,
+    )
+
+
+def create_text_chat_in_first_empty_slot(*, title: str | None = None) -> dict | None:
+    default_profile_id = TEXT_MODEL_PROFILE_STANDARD
+    default_profile = get_text_model_profile(default_profile_id)
+    return chat_store.create_text_chat_in_first_empty_slot(
+        text_chat_db_path(),
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        title=title,
+        now_iso=utc_now_iso(),
+        default_model_profile=default_profile_id,
+        default_model_label=default_profile.get("actual_model_name") or resolve_text_chat_model_label(),
+        default_visible_messages_limit=TEXT_CHAT_MAX_VISIBLE_MESSAGES,
+    )
+
+
+def append_text_chat_message(slot_index: int, *, role: str, content: str) -> None:
+    chat_store.append_text_chat_message(
+        text_chat_db_path(),
+        slot_index,
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        role=role,
+        content=content,
+        now_iso=utc_now_iso(),
+    )
+
+
+def get_text_chat_slot(slot_index: int) -> dict:
+    slot_data = chat_store.get_text_chat_slot(
+        text_chat_db_path(),
+        slot_index,
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        default_model_profile=TEXT_MODEL_PROFILE_STANDARD,
+        visible_messages_limit=TEXT_CHAT_MAX_VISIBLE_MESSAGES,
+    )
+    return chat_payloads.build_text_chat_active_chat_payload(
+        slot_index,
+        slot_data,
+        default_title=build_default_text_chat_title(slot_index),
+        default_model_profile=TEXT_MODEL_PROFILE_STANDARD,
+    )
+
+
+def list_text_chat_slots() -> list[dict]:
+    slot_data = chat_store.list_text_chat_slots(
+        text_chat_db_path(),
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        default_model_profile=TEXT_MODEL_PROFILE_STANDARD,
+        visible_messages_limit=TEXT_CHAT_MAX_VISIBLE_MESSAGES,
+    )
+    return [
+        chat_payloads.build_text_chat_slot_overview_payload(
+            int(slot.get("slot_index") or slot_index),
+            slot,
+            default_title=build_default_text_chat_title(int(slot.get("slot_index") or slot_index)),
+            default_model_profile=TEXT_MODEL_PROFILE_STANDARD,
+            preview_limit=100,
+        )
+        for slot_index, slot in enumerate(slot_data, start=1)
+    ]
+
+
+def build_text_chat_prompt(current_prompt: str, *, summary: str | None, recent_messages: list[dict]) -> str:
+    return current_prompt.strip()
+
+
+def build_text_chat_overview_payload() -> dict:
+    active_slot_index = get_active_text_chat_slot_index()
+    active_chat = get_text_chat_slot(active_slot_index)
+    profile_state = build_text_model_profiles_state()
+    return chat_payloads.build_text_chat_overview_payload(
+        slot_count=TEXT_CHAT_SLOT_COUNT,
+        active_slot_index=active_slot_index,
+        active_chat=active_chat,
+        slots=list_text_chat_slots(),
+        profile_state=profile_state,
+    )
+
+
+def resolve_text_chat_slot_request_path(request_path: str) -> tuple[int, str | None] | None:
+    return chat_requests.resolve_text_chat_slot_request_path(
+        request_path,
+        slots_path=TEXT_CHAT_SLOTS_PATH,
+        slot_index_normalizer=normalize_text_chat_slot_index,
+    )
+
 def output_dir_access_state() -> tuple[bool, str | None]:
     root = output_root()
     if not root.exists():
         return False, "output_dir_missing"
-    if not root.is_dir():
-        return False, "output_dir_not_directory"
-    if not os.access(root, os.R_OK | os.X_OK):
-        return False, "output_dir_not_accessible"
-    try:
-        next(root.iterdir(), None)
-    except OSError as exc:
-        return False, str(exc)
-    return True, None
+    return app_paths.dir_access_state(
+        root,
+        not_directory_blocker="output_dir_not_directory",
+        not_accessible_blocker="output_dir_not_accessible",
+    )
 
 
 def input_dir_access_state() -> tuple[bool, str | None]:
-    root = input_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return False, str(exc)
-
-    if not root.is_dir():
-        return False, "input_dir_not_directory"
-    if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-        return False, "input_dir_not_accessible"
-    try:
-        next(root.iterdir(), None)
-    except OSError as exc:
-        return False, str(exc)
-    return True, None
+    return app_paths.dir_access_state(
+        input_root(),
+        not_directory_blocker="input_dir_not_directory",
+        not_accessible_blocker="input_dir_not_accessible",
+    )
 
 
 def reference_dir_access_state() -> tuple[bool, str | None]:
-    root = reference_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return False, str(exc)
-
-    if not root.is_dir():
-        return False, "reference_dir_not_directory"
-    if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-        return False, "reference_dir_not_accessible"
-    try:
-        next(root.iterdir(), None)
-    except OSError as exc:
-        return False, str(exc)
-    return True, None
+    return app_paths.dir_access_state(
+        reference_root(),
+        not_directory_blocker="reference_dir_not_directory",
+        not_accessible_blocker="reference_dir_not_accessible",
+    )
 
 
 def multi_reference_dir_access_state() -> tuple[bool, str | None]:
-    root = multi_reference_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return False, str(exc)
-
-    if not root.is_dir():
-        return False, "multi_reference_dir_not_directory"
-    if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-        return False, "multi_reference_dir_not_accessible"
-    try:
-        next(root.iterdir(), None)
-    except OSError as exc:
-        return False, str(exc)
-    return True, None
+    return app_paths.dir_access_state(
+        multi_reference_root(),
+        not_directory_blocker="multi_reference_dir_not_directory",
+        not_accessible_blocker="multi_reference_dir_not_accessible",
+    )
 
 
 def mask_dir_access_state() -> tuple[bool, str | None]:
-    root = mask_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return False, str(exc)
-
-    if not root.is_dir():
-        return False, "mask_dir_not_directory"
-    if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-        return False, "mask_dir_not_accessible"
-    try:
-        next(root.iterdir(), None)
-    except OSError as exc:
-        return False, str(exc)
-    return True, None
+    return app_paths.dir_access_state(
+        mask_root(),
+        not_directory_blocker="mask_dir_not_directory",
+        not_accessible_blocker="mask_dir_not_accessible",
+    )
 
 
 def identity_transfer_dir_access_state(role: str) -> tuple[bool, str | None]:
-    root = identity_transfer_role_root(role)
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return False, str(exc)
-
-    if not root.is_dir():
-        return False, "identity_transfer_role_dir_not_directory"
-    if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-        return False, "identity_transfer_role_dir_not_accessible"
-    try:
-        next(root.iterdir(), None)
-    except OSError as exc:
-        return False, str(exc)
-    return True, None
+    return app_paths.dir_access_state(
+        identity_transfer_role_root(role),
+        not_directory_blocker="identity_transfer_role_dir_not_directory",
+        not_accessible_blocker="identity_transfer_role_dir_not_accessible",
+    )
 
 
 def results_dir_access_state() -> tuple[bool, str | None]:
-    root = result_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return False, str(exc)
+    return app_paths.dir_access_state(
+        result_root(),
+        not_directory_blocker="results_dir_not_directory",
+        not_accessible_blocker="results_dir_not_accessible",
+    )
 
-    if not root.is_dir():
-        return False, "results_dir_not_directory"
-    if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-        return False, "results_dir_not_accessible"
-    try:
-        next(root.iterdir(), None)
-    except OSError as exc:
-        return False, str(exc)
-    return True, None
+
+def exports_dir_access_state() -> tuple[bool, str | None]:
+    return app_paths.dir_access_state(
+        export_root(),
+        not_directory_blocker="exports_dir_not_directory",
+        not_accessible_blocker="exports_dir_not_accessible",
+    )
 
 
 def resolve_internal_output_path(output_file: str | Path | None) -> tuple[Path | None, str | None]:
-    if output_file is None:
-        return None, "generated_file_not_accessible"
-
-    candidate = Path(output_file)
-    if not candidate.is_absolute():
-        candidate = output_root() / candidate
-
-    resolved_output = candidate.resolve()
-    try:
-        resolved_output.relative_to(output_root())
-    except ValueError:
-        return None, "generated_file_not_accessible"
-    return resolved_output, None
+    return app_paths.resolve_internal_output_path(output_file, output_root=output_root())
 
 
 def is_accessible_output_file(path: Path) -> bool:
-    if not path.exists() or not path.is_file():
-        return False
-    try:
-        with path.open("rb") as handle:
-            handle.read(1)
-    except OSError:
-        return False
-    return True
+    return app_paths.is_accessible_output_file(path)
 
 
 def output_path_to_web_path(path: Path) -> str:
-    relative = path.relative_to(output_root())
-    encoded = "/".join(quote(part) for part in relative.parts)
-    return f"{OUTPUT_ROUTE_PREFIX}{encoded}"
+    return app_paths.path_to_web_path(path, root=output_root(), route_prefix=OUTPUT_ROUTE_PREFIX)
 
 
 def input_path_to_web_path(path: Path) -> str:
-    relative = path.relative_to(input_root())
-    encoded = "/".join(quote(part) for part in relative.parts)
-    return f"{INPUT_ROUTE_PREFIX}{encoded}"
+    return app_paths.path_to_web_path(path, root=input_root(), route_prefix=INPUT_ROUTE_PREFIX)
 
 
 def reference_path_to_web_path(path: Path) -> str:
-    relative = path.relative_to(reference_root())
-    encoded = "/".join(quote(part) for part in relative.parts)
-    return f"{REFERENCE_ROUTE_PREFIX}{encoded}"
+    return app_paths.path_to_web_path(path, root=reference_root(), route_prefix=REFERENCE_ROUTE_PREFIX)
 
 
 def multi_reference_path_to_web_path(path: Path) -> str:
-    relative = path.relative_to(multi_reference_root())
-    encoded = "/".join(quote(part) for part in relative.parts)
-    return f"{MULTI_REFERENCE_ROUTE_PREFIX}{encoded}"
+    return app_paths.path_to_web_path(path, root=multi_reference_root(), route_prefix=MULTI_REFERENCE_ROUTE_PREFIX)
 
 
 def mask_path_to_web_path(path: Path) -> str:
-    relative = path.relative_to(mask_root())
-    encoded = "/".join(quote(part) for part in relative.parts)
-    return f"{MASK_ROUTE_PREFIX}{encoded}"
+    return app_paths.path_to_web_path(path, root=mask_root(), route_prefix=MASK_ROUTE_PREFIX)
 
 
 def identity_transfer_path_to_web_path(path: Path, role: str) -> str:
-    relative = path.relative_to(identity_transfer_role_root(role))
-    encoded = "/".join(quote(part) for part in relative.parts)
-    return f"{IDENTITY_TRANSFER_ROUTE_PREFIX}{quote(role)}/{encoded}"
+    return app_paths.identity_transfer_path_to_web_path(
+        path,
+        role=role,
+        role_root=identity_transfer_role_root(role),
+        route_prefix=IDENTITY_TRANSFER_ROUTE_PREFIX,
+    )
 
 
 def result_path_to_web_path(path: Path) -> str:
-    relative = path.relative_to(result_root())
-    encoded = "/".join(quote(part) for part in relative.parts)
-    return f"{RESULT_FILE_ROUTE_PREFIX}{encoded}"
+    return app_paths.path_to_web_path(path, root=result_root(), route_prefix=RESULT_FILE_ROUTE_PREFIX)
+
+
+def export_path_to_web_path(path: Path) -> str:
+    return app_paths.path_to_web_path(path, root=export_root(), route_prefix=EXPORT_FILE_ROUTE_PREFIX)
 
 
 def result_id_to_download_url(result_id: str) -> str:
@@ -784,637 +1558,325 @@ def map_internal_output_to_web_path(output_file: str | Path | None) -> tuple[str
 
 
 def resolve_output_request_path(request_path: str) -> Path | None:
-    if not request_path.startswith(OUTPUT_ROUTE_PREFIX):
-        return None
-
-    relative = unquote(request_path.removeprefix(OUTPUT_ROUTE_PREFIX))
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute():
-        return None
-
-    safe_parts: list[str] = []
-    for part in pure_path.parts:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            return None
-        safe_parts.append(part)
-
-    if not safe_parts:
-        return None
-
-    candidate = output_root().joinpath(*safe_parts).resolve()
-    try:
-        candidate.relative_to(output_root())
-    except ValueError:
-        return None
-    return candidate
+    return app_paths.resolve_request_path(request_path, route_prefix=OUTPUT_ROUTE_PREFIX, root=output_root())
 
 
 def resolve_input_request_path(request_path: str) -> Path | None:
-    if not request_path.startswith(INPUT_ROUTE_PREFIX):
-        return None
-
-    relative = unquote(request_path.removeprefix(INPUT_ROUTE_PREFIX))
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute():
-        return None
-
-    safe_parts: list[str] = []
-    for part in pure_path.parts:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            return None
-        safe_parts.append(part)
-
-    if not safe_parts:
-        return None
-
-    candidate = input_root().joinpath(*safe_parts).resolve()
-    try:
-        candidate.relative_to(input_root())
-    except ValueError:
-        return None
-    return candidate
+    return app_paths.resolve_request_path(request_path, route_prefix=INPUT_ROUTE_PREFIX, root=input_root())
 
 
 def resolve_reference_request_path(request_path: str) -> Path | None:
-    if not request_path.startswith(REFERENCE_ROUTE_PREFIX):
-        return None
-
-    relative = unquote(request_path.removeprefix(REFERENCE_ROUTE_PREFIX))
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute():
-        return None
-
-    safe_parts: list[str] = []
-    for part in pure_path.parts:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            return None
-        safe_parts.append(part)
-
-    if not safe_parts:
-        return None
-
-    candidate = reference_root().joinpath(*safe_parts).resolve()
-    try:
-        candidate.relative_to(reference_root())
-    except ValueError:
-        return None
-    return candidate
+    return app_paths.resolve_request_path(request_path, route_prefix=REFERENCE_ROUTE_PREFIX, root=reference_root())
 
 
 def resolve_multi_reference_request_path(request_path: str) -> Path | None:
-    if not request_path.startswith(MULTI_REFERENCE_ROUTE_PREFIX):
-        return None
-
-    relative = unquote(request_path.removeprefix(MULTI_REFERENCE_ROUTE_PREFIX))
-    if not relative:
-        return None
-
-    normalized_parts = PurePosixPath(relative).parts
-    if not normalized_parts:
-        return None
-    if any(part in {"", ".", ".."} for part in normalized_parts):
-        return None
-
-    candidate = (multi_reference_root() / Path(*normalized_parts)).resolve()
-    try:
-        candidate.relative_to(multi_reference_root())
-    except ValueError:
-        return None
-    return candidate
+    return app_paths.resolve_multi_reference_request_path(
+        request_path,
+        route_prefix=MULTI_REFERENCE_ROUTE_PREFIX,
+        root=multi_reference_root(),
+    )
 
 
 def resolve_mask_request_path(request_path: str) -> Path | None:
-    if not request_path.startswith(MASK_ROUTE_PREFIX):
-        return None
-
-    relative = unquote(request_path.removeprefix(MASK_ROUTE_PREFIX))
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute():
-        return None
-
-    safe_parts: list[str] = []
-    for part in pure_path.parts:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            return None
-        safe_parts.append(part)
-
-    if not safe_parts:
-        return None
-
-    candidate = mask_root().joinpath(*safe_parts).resolve()
-    try:
-        candidate.relative_to(mask_root())
-    except ValueError:
-        return None
-    return candidate
+    return app_paths.resolve_request_path(request_path, route_prefix=MASK_ROUTE_PREFIX, root=mask_root())
 
 
 def resolve_identity_transfer_role_request_path(request_path: str) -> Path | None:
-    if not request_path.startswith(IDENTITY_TRANSFER_ROUTE_PREFIX):
-        return None
-
-    relative = unquote(request_path.removeprefix(IDENTITY_TRANSFER_ROUTE_PREFIX))
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute() or len(pure_path.parts) < 2:
-        return None
-
-    role = str(pure_path.parts[0]).strip()
-    if role not in IDENTITY_TRANSFER_ROLE_SET:
-        return None
-
-    safe_parts: list[str] = []
-    for part in pure_path.parts[1:]:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            return None
-        safe_parts.append(part)
-
-    if not safe_parts:
-        return None
-
-    candidate = identity_transfer_role_root(role).joinpath(*safe_parts).resolve()
-    try:
-        candidate.relative_to(identity_transfer_role_root(role))
-    except ValueError:
-        return None
-    return candidate
+    return app_paths.resolve_identity_transfer_role_request_path(
+        request_path,
+        route_prefix=IDENTITY_TRANSFER_ROUTE_PREFIX,
+        allowed_roles=IDENTITY_TRANSFER_ROLE_SET,
+        role_root_builder=identity_transfer_role_root,
+    )
 
 
 def resolve_result_request_path(request_path: str) -> Path | None:
-    if not request_path.startswith(RESULT_FILE_ROUTE_PREFIX):
-        return None
+    return app_paths.resolve_request_path(request_path, route_prefix=RESULT_FILE_ROUTE_PREFIX, root=result_root())
 
-    relative = unquote(request_path.removeprefix(RESULT_FILE_ROUTE_PREFIX))
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute():
-        return None
 
-    safe_parts: list[str] = []
-    for part in pure_path.parts:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            return None
-        safe_parts.append(part)
-
-    if not safe_parts:
-        return None
-
-    candidate = result_root().joinpath(*safe_parts).resolve()
-    try:
-        candidate.relative_to(result_root())
-    except ValueError:
-        return None
-    return candidate
+def resolve_export_request_path(request_path: str) -> Path | None:
+    return app_paths.resolve_request_path(request_path, route_prefix=EXPORT_FILE_ROUTE_PREFIX, root=export_root())
 
 
 def resolve_result_download_request_id(request_path: str) -> str | None:
-    if not request_path.startswith(RESULT_DOWNLOAD_ROUTE_PREFIX):
-        return None
-
-    relative = unquote(request_path.removeprefix(RESULT_DOWNLOAD_ROUTE_PREFIX)).strip()
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute():
-        return None
-
-    if len(pure_path.parts) != 1:
-        return None
-
-    result_id = pure_path.parts[0].strip()
-    if not result_id or result_id in {".", ".."} or Path(result_id).name != result_id:
-        return None
-    return result_id
+    return app_paths.resolve_result_download_request_id(
+        request_path,
+        route_prefix=RESULT_DOWNLOAD_ROUTE_PREFIX,
+    )
 
 
 def resolve_multi_reference_slot_reset_index(request_path: str) -> int | None:
-    if not request_path.startswith(MULTI_REFERENCE_IMAGE_SLOT_RESET_PREFIX):
-        return None
-    relative = unquote(request_path.removeprefix(MULTI_REFERENCE_IMAGE_SLOT_RESET_PREFIX)).strip()
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute() or len(pure_path.parts) != 1:
-        return None
-    try:
-        return parse_required_multi_reference_slot_index(pure_path.parts[0])
-    except ValueError:
-        return None
+    return app_paths.resolve_multi_reference_slot_reset_index(
+        request_path,
+        route_prefix=MULTI_REFERENCE_IMAGE_SLOT_RESET_PREFIX,
+        slot_parser=parse_required_multi_reference_slot_index,
+    )
 
 
 def parse_results_limit(query_string: str) -> int:
-    parsed = parse_qs(query_string or "", keep_blank_values=False)
-    raw_value = parsed.get("limit", [str(RESULTS_DEFAULT_LIMIT)])[0]
-    try:
-        numeric_value = int(str(raw_value).strip())
-    except ValueError as exc:
-        raise ValueError("invalid_results_limit") from exc
-
-    if numeric_value <= 0:
-        raise ValueError("invalid_results_limit")
-    return min(RESULTS_MAX_LIMIT, numeric_value)
+    return app_request_utils.parse_results_limit(
+        query_string,
+        default_limit=RESULTS_DEFAULT_LIMIT,
+        max_limit=RESULTS_MAX_LIMIT,
+    )
 
 
 def decode_data_url_image(data_url: object) -> tuple[str, bytes]:
-    if not isinstance(data_url, str) or not data_url.strip():
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="missing_mask_data",
-            message="Mask data is missing.",
-        )
-
-    raw_value = data_url.strip()
-    if "," not in raw_value:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_mask_data",
-            message="Mask data URL is invalid.",
-        )
-
-    header, encoded = raw_value.split(",", 1)
-    if not header.lower().startswith("data:") or ";base64" not in header.lower():
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_mask_data",
-            message="Mask data URL is invalid.",
-        )
-
-    mime_type = header[5:].split(";", 1)[0].strip().lower()
-    if mime_type not in VALID_UPLOAD_MIME_TYPES:
-        raise UploadRequestError(
-            status_code=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-            error_type="invalid_upload",
-            blocker="invalid_file_type",
-            message="Supported formats: .png .jpg .jpeg .webp",
-        )
-
-    try:
-        payload = base64.b64decode(encoded, validate=True)
-    except (ValueError, binascii.Error) as exc:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_mask_data",
-            message="Mask data URL is invalid.",
-        ) from exc
-
-    if not payload:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_upload",
-            blocker="empty_mask_data",
-            message="Mask payload is empty.",
-        )
-
-    return mime_type, payload
+    return app_request_utils.decode_data_url_image(
+        data_url,
+        valid_upload_mime_types=VALID_UPLOAD_MIME_TYPES,
+        upload_error_cls=UploadRequestError,
+    )
 
 
 def validate_mode(value: object) -> str:
-    normalized = str(value if value is not None else "auto").strip().lower()
-    if normalized not in VALID_MODES:
-        raise ValueError("invalid_mode")
-    return normalized
+    return app_request_utils.validate_mode(value, valid_modes=VALID_MODES)
 
 
 def parse_boolean_flag(value: object, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "off", ""}:
-            return False
-    raise ValueError("invalid_use_input_image")
+    return app_request_utils.parse_boolean_flag(value, default=default)
 
 
-def normalize_denoise_strength_value(value: object) -> float:
+def normalize_denoise_strength_value(
+    value: object,
+    *,
+    for_inpainting: bool = False,
+    for_edit: bool = False,
+) -> float:
+    if for_inpainting:
+        default_value = INPAINT_DENOISE_DEFAULT
+        max_value = INPAINT_DENOISE_MAX
+    elif for_edit:
+        default_value = EDIT_DENOISE_DEFAULT
+        max_value = EDIT_DENOISE_MAX
+    else:
+        default_value = DEFAULT_DENOISE_STRENGTH
+        max_value = MAX_DENOISE_STRENGTH
     if value is None or value == "":
-        return DEFAULT_DENOISE_STRENGTH
+        return default_value
     try:
         numeric_value = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid_denoise_strength") from exc
     if not numeric_value == numeric_value:
         raise ValueError("invalid_denoise_strength")
-    return max(MIN_DENOISE_STRENGTH, min(MAX_DENOISE_STRENGTH, numeric_value))
+    return max(MIN_DENOISE_STRENGTH, min(max_value, numeric_value))
+
+
+def analyze_mask_characteristics(mask_image_path: Path | None) -> dict:
+    if mask_image_path is None:
+        return {
+            "area_ratio": 0.0,
+            "bbox": None,
+        }
+
+    try:
+        with Image.open(mask_image_path) as raw_mask:
+            grayscale = raw_mask.convert("L")
+            binary_mask = grayscale.point(lambda value: 255 if value >= MASK_BINARY_THRESHOLD else 0, mode="L")
+            bbox = binary_mask.getbbox()
+            width, height = binary_mask.size
+            total_pixels = max(1, width * height)
+            painted_pixels = sum(1 for value in binary_mask.getdata() if value > 0)
+    except OSError:
+        return {
+            "area_ratio": 0.0,
+            "bbox": None,
+        }
+
+    return {
+        "area_ratio": painted_pixels / total_pixels,
+        "bbox": bbox,
+    }
+
+
+def prompt_targets_clothing_edit(prompt: str) -> bool:
+    normalized = str(prompt or "").strip().lower()
+    if not normalized:
+        return False
+    keyword_groups = (
+        ("dress",),
+        ("shirt",),
+        ("top",),
+        ("blouse",),
+        ("jacket",),
+        ("coat",),
+        ("hoodie",),
+        ("sweater",),
+        ("skirt",),
+        ("pants",),
+        ("trousers",),
+        ("jeans",),
+        ("fabric",),
+        ("garment",),
+        ("clothing",),
+        ("outfit",),
+        ("satin",),
+        ("silk",),
+        ("cotton",),
+        ("leather",),
+        ("color", "shirt"),
+        ("color", "dress"),
+        ("farbe",),
+        ("kleid",),
+        ("bluse",),
+        ("jacke",),
+        ("stoff",),
+        ("kleidung",),
+        ("oberteil",),
+        ("rock",),
+        ("hose",),
+    )
+    for keywords in keyword_groups:
+        if all(keyword in normalized for keyword in keywords):
+            return True
+    return False
+
+
+def prompt_targets_clothing_appearance_change(prompt: str) -> bool:
+    normalized = str(prompt or "").strip().lower()
+    if not normalized:
+        return False
+    keywords = (
+        "color",
+        "colour",
+        "farbe",
+        "fabric",
+        "stoff",
+        "texture",
+        "textur",
+        "material",
+        "surface",
+        "finish",
+        "silk",
+        "satin",
+        "linen",
+        "cotton",
+        "leather",
+        "matte",
+        "glossy",
+        "emerald",
+        "green",
+        "blue",
+        "navy",
+        "red",
+        "black",
+        "white",
+        "gold",
+    )
+    return any(keyword in normalized for keyword in keywords)
+
+
+def resolve_inpainting_tuning(
+    *,
+    prompt: str,
+    checkpoint: str | None,
+    mask_image_path: Path | None,
+    requested_denoise_strength: object,
+) -> dict:
+    mask_info = analyze_mask_characteristics(mask_image_path)
+    area_ratio = float(mask_info.get("area_ratio") or 0.0)
+    large_mask = area_ratio >= INPAINT_CLOTHING_MASK_RATIO_THRESHOLD
+    clothing_edit = prompt_targets_clothing_edit(prompt)
+    clothing_appearance_change = prompt_targets_clothing_appearance_change(prompt)
+    apply_clothing_profile = large_mask and clothing_edit
+    checkpoint_is_anime = checkpoint_token(checkpoint) in ANIME_MOTIF_TUNING_CHECKPOINTS
+    denoise_missing = requested_denoise_strength is None or requested_denoise_strength == ""
+
+    if apply_clothing_profile:
+        form_preserving_profile = clothing_appearance_change
+        return {
+            "apply_clothing_profile": True,
+            "cfg": (
+                ANIME_INPAINT_CLOTHING_FORM_CFG if checkpoint_is_anime else PHOTO_INPAINT_CLOTHING_FORM_CFG
+            ) if form_preserving_profile else (
+                ANIME_INPAINT_CLOTHING_CFG if checkpoint_is_anime else PHOTO_INPAINT_CLOTHING_CFG
+            ),
+            "steps": (
+                ANIME_INPAINT_CLOTHING_FORM_STEPS if checkpoint_is_anime else PHOTO_INPAINT_CLOTHING_FORM_STEPS
+            ) if form_preserving_profile else (
+                ANIME_INPAINT_CLOTHING_STEPS if checkpoint_is_anime else PHOTO_INPAINT_CLOTHING_STEPS
+            ),
+            "prompt_suffix": INPAINT_CLOTHING_FORM_EDIT_PROMPT_SUFFIX if form_preserving_profile else INPAINT_CLOTHING_EDIT_PROMPT_SUFFIX,
+            "negative_suffix": INPAINT_CLOTHING_FORM_NEGATIVE_SUFFIX if form_preserving_profile else INPAINT_CLOTHING_NEGATIVE_SUFFIX,
+            "denoise_strength": (
+                INPAINT_CLOTHING_FORM_DEFAULT_DENOISE if form_preserving_profile else INPAINT_CLOTHING_DEFAULT_DENOISE
+            ) if denoise_missing else None,
+            "grow_mask_by": INPAINT_CLOTHING_GROW_MASK_BY,
+            "mask_area_ratio": area_ratio,
+            "form_preserving_profile": form_preserving_profile,
+        }
+
+    return {
+        "apply_clothing_profile": False,
+        "cfg": None,
+        "steps": None,
+        "prompt_suffix": None,
+        "negative_suffix": None,
+        "denoise_strength": None,
+        "grow_mask_by": None,
+        "mask_area_ratio": area_ratio,
+    }
 
 
 def sanitize_original_name(filename: str | None) -> str:
-    if not isinstance(filename, str):
-        return "upload"
-    normalized = Path(filename).name.replace("\x00", "").strip()
-    return normalized or "upload"
+    return image_input_validation.sanitize_original_name(filename)
 
 
 def normalize_upload_source_type(value: str | None) -> str:
-    normalized = str(value or "file").strip().lower()
-    if normalized not in VALID_UPLOAD_SOURCE_TYPES:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_source_type",
-            message="Upload source_type must be file, clipboard, or mask.",
-        )
-    return normalized
+    return image_input_validation.normalize_upload_source_type(
+        value,
+        valid_source_types=VALID_UPLOAD_SOURCE_TYPES,
+    )
 
 
 def parse_multipart_image(content_type: str, body: bytes) -> tuple[str, bytes, str]:
-    message = BytesParser(policy=email_policy_default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+    return image_input_validation.parse_multipart_image(
+        content_type,
+        body,
+        source_type_normalizer=normalize_upload_source_type,
     )
-    if not message.is_multipart():
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_multipart",
-            message="Upload request must be multipart/form-data.",
-        )
-
-    file_parts: list[tuple[str, bytes]] = []
-    source_type = "file"
-    for part in message.iter_parts():
-        if part.get_content_disposition() != "form-data":
-            continue
-        field_name = str(part.get_param("name", header="content-disposition") or "").strip().lower()
-        filename = part.get_filename()
-        if not filename:
-            if field_name == "source_type":
-                source_type = normalize_upload_source_type(part.get_content())
-            continue
-        payload = part.get_payload(decode=True) or b""
-        file_parts.append((filename, payload))
-
-    if not file_parts:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="missing_file",
-            message="No upload file was provided.",
-        )
-    if len(file_parts) > 1:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="multiple_files_not_supported",
-            message="Exactly one image file is supported.",
-        )
-    original_name, payload = file_parts[0]
-    return original_name, payload, source_type
 
 
 def parse_multipart_multi_reference_image(content_type: str, body: bytes) -> tuple[str, bytes, int | None]:
-    message = BytesParser(policy=email_policy_default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+    return image_input_validation.parse_multipart_multi_reference_image(
+        content_type,
+        body,
+        slot_index_parser=parse_optional_multi_reference_slot_index,
     )
-    if not message.is_multipart():
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_multipart",
-            message="Upload request must be multipart/form-data.",
-        )
-
-    file_parts: list[tuple[str, bytes]] = []
-    slot_index: int | None = None
-    for part in message.iter_parts():
-        if part.get_content_disposition() != "form-data":
-            continue
-        field_name = str(part.get_param("name", header="content-disposition") or "").strip().lower()
-        filename = part.get_filename()
-        if not filename:
-            if field_name == "slot_index":
-                try:
-                    slot_index = parse_optional_multi_reference_slot_index(part.get_content())
-                except ValueError as exc:
-                    raise UploadRequestError(
-                        status_code=HTTPStatus.BAD_REQUEST,
-                        error_type="invalid_request",
-                        blocker=str(exc),
-                        message="slot_index must be auto, empty, or 1-3.",
-                    ) from exc
-            continue
-        payload = part.get_payload(decode=True) or b""
-        file_parts.append((filename, payload))
-
-    if not file_parts:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="missing_file",
-            message="No upload file was provided.",
-        )
-    if len(file_parts) > 1:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="multiple_files_not_supported",
-            message="Exactly one image file is supported.",
-        )
-
-    original_name, payload = file_parts[0]
-    return original_name, payload, slot_index
 
 
 def parse_multipart_identity_transfer_role_image(content_type: str, body: bytes) -> tuple[str, bytes, str]:
-    message = BytesParser(policy=email_policy_default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+    return image_input_validation.parse_multipart_identity_transfer_role_image(
+        content_type,
+        body,
+        role_parser=parse_required_identity_transfer_role,
     )
-    if not message.is_multipart():
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_multipart",
-            message="Upload request must be multipart/form-data.",
-        )
-
-    file_parts: list[tuple[str, bytes]] = []
-    role: str | None = None
-    for part in message.iter_parts():
-        if part.get_content_disposition() != "form-data":
-            continue
-        field_name = str(part.get_param("name", header="content-disposition") or "").strip().lower()
-        filename = part.get_filename()
-        if not filename:
-            if field_name == "role":
-                try:
-                    role = parse_required_identity_transfer_role(part.get_content())
-                except ValueError as exc:
-                    raise UploadRequestError(
-                        status_code=HTTPStatus.BAD_REQUEST,
-                        error_type="invalid_request",
-                        blocker=str(exc),
-                        message="role must be one of the supported V6.3.1 transfer roles.",
-                    ) from exc
-            continue
-        payload = part.get_payload(decode=True) or b""
-        file_parts.append((filename, payload))
-
-    if role is None:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="invalid_identity_transfer_role",
-            message="role must be one of the supported V6.3.1 transfer roles.",
-        )
-    if not file_parts:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="missing_file",
-            message="No upload file was provided.",
-        )
-    if len(file_parts) > 1:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="multiple_files_not_supported",
-            message="Exactly one image file is supported.",
-        )
-
-    original_name, payload = file_parts[0]
-    return original_name, payload, role
 
 
 def inspect_image_upload(original_name: str, payload: bytes) -> dict:
-    sanitized_name = sanitize_original_name(original_name)
-    original_extension = Path(sanitized_name).suffix.lower()
-    if original_extension not in VALID_UPLOAD_EXTENSIONS:
-        raise UploadRequestError(
-            status_code=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-            error_type="invalid_upload",
-            blocker="invalid_file_type",
-            message="Supported formats: .png .jpg .jpeg .webp",
-        )
-    if not payload:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_upload",
-            blocker="empty_file",
-            message="Uploaded file is empty.",
-        )
-    if len(payload) > UPLOAD_MAX_BYTES:
-        raise UploadRequestError(
-            status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-            error_type="invalid_upload",
-            blocker="file_too_large",
-            message="Uploaded file exceeds the size limit.",
-        )
-
-    try:
-        with Image.open(BytesIO(payload)) as image:
-            image.load()
-            format_name = str(image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, OSError) as exc:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_upload",
-            blocker="invalid_image_data",
-            message="Uploaded payload is not a supported image.",
-        ) from exc
-
-    format_info = VALID_UPLOAD_FORMATS.get(format_name)
-    if format_info is None:
-        raise UploadRequestError(
-            status_code=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-            error_type="invalid_upload",
-            blocker="invalid_file_type",
-            message="Supported formats: .png .jpg .jpeg .webp",
-        )
-
-    extension, mime_type = format_info
-    return {
-        "original_name": sanitized_name,
-        "extension": extension,
-        "mime_type": mime_type,
-        "size_bytes": len(payload),
-        "width": int(width),
-        "height": int(height),
-    }
+    return image_input_validation.inspect_image_upload(
+        original_name,
+        payload,
+        valid_extensions=VALID_UPLOAD_EXTENSIONS,
+        upload_max_bytes=UPLOAD_MAX_BYTES,
+        valid_formats=VALID_UPLOAD_FORMATS,
+    )
 
 
 def normalize_mask_upload_payload(payload: bytes) -> tuple[bytes, dict]:
-    try:
-        with Image.open(BytesIO(payload)) as image:
-            image.load()
-            grayscale = image.convert("L")
-            buffer = BytesIO()
-            grayscale.save(buffer, format="PNG")
-            normalized_payload = buffer.getvalue()
-            width, height = grayscale.size
-    except (UnidentifiedImageError, OSError) as exc:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_upload",
-            blocker="invalid_image_data",
-            message="Uploaded payload is not a supported image.",
-        ) from exc
-
-    return normalized_payload, {
-        "extension": ".png",
-        "mime_type": "image/png",
-        "size_bytes": len(normalized_payload),
-        "width": int(width),
-        "height": int(height),
-    }
+    return image_input_validation.normalize_mask_upload_payload(
+        payload,
+        mask_binary_threshold=MASK_BINARY_THRESHOLD,
+    )
 
 
 def validate_browser_mask_payload(payload: bytes, source_image_path: Path) -> None:
-    try:
-        with Image.open(BytesIO(payload)) as image:
-            image.load()
-            grayscale = image.convert("L")
-            mask_size = grayscale.size
-            mask_bbox = grayscale.getbbox()
-    except (UnidentifiedImageError, OSError) as exc:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_upload",
-            blocker="invalid_image_data",
-            message="Uploaded payload is not a supported image.",
-        ) from exc
-
-    try:
-        with Image.open(source_image_path) as source_image:
-            source_image.load()
-            source_size = source_image.size
-    except (UnidentifiedImageError, OSError) as exc:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="missing_input_image",
-            message="Source image is not readable.",
-        ) from exc
-
-    if mask_size != source_size:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_request",
-            blocker="mask_size_mismatch",
-            message="Mask dimensions must match the current source image.",
-        )
-
-    if mask_bbox is None:
-        raise UploadRequestError(
-            status_code=HTTPStatus.BAD_REQUEST,
-            error_type="invalid_upload",
-            blocker="empty_mask",
-            message="Mask contains no painted area.",
-        )
+    image_input_validation.validate_browser_mask_payload(
+        payload,
+        source_image_path,
+        mask_binary_threshold=MASK_BINARY_THRESHOLD,
+    )
 
 
 def clear_stored_images(root: Path) -> None:
@@ -1449,44 +1911,32 @@ def clear_stored_identity_transfer_role_images(role: str | None = None) -> None:
 
 
 def parse_required_identity_transfer_role(value: object) -> str:
-    normalized = str(value or "").strip()
-    if normalized not in IDENTITY_TRANSFER_ROLE_SET:
-        raise ValueError("invalid_identity_transfer_role")
-    return normalized
+    return image_input_validation.parse_required_identity_transfer_role(
+        value,
+        allowed_roles=IDENTITY_TRANSFER_ROLE_SET,
+    )
 
 
 def parse_optional_multi_reference_slot_index(value: object) -> int | None:
-    if value is None:
-        return None
-    normalized = str(value).strip().lower()
-    if not normalized or normalized == "auto":
-        return None
-    if not normalized.isdigit():
-        raise ValueError("invalid_multi_reference_slot")
-    parsed = int(normalized)
-    if parsed < 1 or parsed > MAX_MULTI_REFERENCE_SLOTS:
-        raise ValueError("invalid_multi_reference_slot")
-    return parsed
+    return image_input_validation.parse_optional_multi_reference_slot_index(
+        value,
+        max_slots=MAX_MULTI_REFERENCE_SLOTS,
+    )
 
 
 def parse_required_multi_reference_slot_index(value: object) -> int:
-    slot_index = parse_optional_multi_reference_slot_index(value)
-    if slot_index is None:
-        raise ValueError("invalid_multi_reference_slot")
-    return slot_index
+    return image_input_validation.parse_required_multi_reference_slot_index(
+        value,
+        max_slots=MAX_MULTI_REFERENCE_SLOTS,
+    )
 
 
 def resolve_identity_transfer_role_reset_name(request_path: str) -> str | None:
-    if not request_path.startswith(IDENTITY_TRANSFER_ROLE_RESET_PREFIX):
-        return None
-    relative = unquote(request_path.removeprefix(IDENTITY_TRANSFER_ROLE_RESET_PREFIX)).strip()
-    pure_path = PurePosixPath(relative)
-    if relative == "" or pure_path.is_absolute() or len(pure_path.parts) != 1:
-        return None
-    try:
-        return parse_required_identity_transfer_role(pure_path.parts[0])
-    except ValueError:
-        return None
+    return app_paths.resolve_identity_transfer_role_reset_name(
+        request_path,
+        route_prefix=IDENTITY_TRANSFER_ROLE_RESET_PREFIX,
+        role_parser=parse_required_identity_transfer_role,
+    )
 
 
 def clear_stored_multi_reference_images(*, slot_index: int | None = None) -> None:
@@ -1516,611 +1966,189 @@ def clear_all_identity_transfer_roles() -> None:
 
 
 def input_metadata_path(path: Path) -> Path:
-    return path.with_name(f"{path.name}.json")
+    return upload_store.input_metadata_path(path)
 
 
 def write_input_metadata(path: Path, metadata: dict) -> None:
-    metadata_path = input_metadata_path(path)
-    temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
-    temp_path.write_text(json.dumps(metadata, ensure_ascii=True, separators=(",", ":")), encoding="utf-8")
-    temp_path.replace(metadata_path)
+    upload_store.write_input_metadata(path, metadata)
 
 
 def read_input_metadata(path: Path) -> dict | None:
-    metadata_path = input_metadata_path(path)
-    if not metadata_path.exists() or not metadata_path.is_file():
-        return None
-    try:
-        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return payload
+    return upload_store.read_input_metadata(path)
 
 
 def describe_stored_input_image(path: Path) -> dict | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS:
-        return None
-    try:
-        with Image.open(path) as image:
-            image.load()
-            format_name = str(image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, OSError):
-        return None
-
-    format_info = VALID_UPLOAD_FORMATS.get(format_name)
-    if format_info is None:
-        return None
-
-    _, mime_type = format_info
-    metadata = read_input_metadata(path) or {}
-    source_type = str(metadata.get("source_type") or "file").strip().lower()
-    if source_type not in VALID_UPLOAD_SOURCE_TYPES:
-        source_type = "file"
-    original_name = str(metadata.get("original_name") or path.name).strip() or path.name
-    return {
-        "image_id": path.stem,
-        "source_type": source_type,
-        "original_name": original_name,
-        "stored_name": path.name,
-        "mime_type": mime_type,
-        "size_bytes": path.stat().st_size,
-        "width": int(width),
-        "height": int(height),
-        "preview_url": input_path_to_web_path(path),
-    }
+    return upload_store.describe_stored_input_image(
+        path,
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        valid_upload_formats=VALID_UPLOAD_FORMATS,
+        valid_upload_source_types=VALID_UPLOAD_SOURCE_TYPES,
+        preview_url_builder=input_path_to_web_path,
+    )
 
 
 def describe_stored_mask_image(path: Path) -> dict | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS:
-        return None
-    try:
-        with Image.open(path) as image:
-            image.load()
-            format_name = str(image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, OSError):
-        return None
-
-    format_info = VALID_UPLOAD_FORMATS.get(format_name)
-    if format_info is None:
-        return None
-
-    _, mime_type = format_info
-    metadata = read_input_metadata(path) or {}
-    original_name = str(metadata.get("original_name") or path.name).strip() or path.name
-    return {
-        "image_id": path.stem,
-        "source_type": "mask",
-        "original_name": original_name,
-        "stored_name": path.name,
-        "mime_type": mime_type,
-        "size_bytes": path.stat().st_size,
-        "width": int(width),
-        "height": int(height),
-        "preview_url": mask_path_to_web_path(path),
-    }
+    return upload_store.describe_stored_mask_image(
+        path,
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        valid_upload_formats=VALID_UPLOAD_FORMATS,
+        preview_url_builder=mask_path_to_web_path,
+    )
 
 
 def describe_stored_reference_image(path: Path) -> dict | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS:
-        return None
-    try:
-        with Image.open(path) as image:
-            image.load()
-            format_name = str(image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, OSError):
-        return None
-
-    format_info = VALID_UPLOAD_FORMATS.get(format_name)
-    if format_info is None:
-        return None
-
-    _, mime_type = format_info
-    metadata = read_input_metadata(path) or {}
-    original_name = str(metadata.get("original_name") or path.name).strip() or path.name
-    return {
-        "image_id": path.stem,
-        "source_type": "reference",
-        "original_name": original_name,
-        "stored_name": path.name,
-        "mime_type": mime_type,
-        "size_bytes": path.stat().st_size,
-        "width": int(width),
-        "height": int(height),
-        "preview_url": reference_path_to_web_path(path),
-    }
+    return upload_store.describe_stored_reference_image(
+        path,
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        valid_upload_formats=VALID_UPLOAD_FORMATS,
+        preview_url_builder=reference_path_to_web_path,
+    )
 
 
 def current_input_image_state() -> dict | None:
-    root = input_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        candidates = sorted(
-            path for path in root.iterdir()
-            if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS
-        )
-    except OSError:
-        return None
-
-    for candidate in candidates:
-        description = describe_stored_input_image(candidate)
-        if description is not None:
-            return description
-    return None
+    return upload_store.current_input_image_state(
+        input_root(),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        describe_callback=describe_stored_input_image,
+    )
 
 
 def current_mask_image_state() -> dict | None:
-    root = mask_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        candidates = sorted(
-            path for path in root.iterdir()
-            if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS
-        )
-    except OSError:
-        return None
-
-    for candidate in candidates:
-        description = describe_stored_mask_image(candidate)
-        if description is not None:
-            return description
-    return None
+    return upload_store.current_mask_image_state(
+        mask_root(),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        describe_callback=describe_stored_mask_image,
+    )
 
 
 def current_reference_image_state() -> dict | None:
-    root = reference_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        candidates = sorted(
-            path for path in root.iterdir()
-            if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS
-        )
-    except OSError:
-        return None
-
-    for candidate in candidates:
-        description = describe_stored_reference_image(candidate)
-        if description is not None:
-            return description
-    return None
+    return upload_store.current_reference_image_state(
+        reference_root(),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        describe_callback=describe_stored_reference_image,
+    )
 
 
 def describe_stored_identity_transfer_role_image(path: Path, role: str) -> dict | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS:
-        return None
-    try:
-        with Image.open(path) as image:
-            image.load()
-            format_name = str(image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, OSError):
-        return None
-
-    format_info = VALID_UPLOAD_FORMATS.get(format_name)
-    if format_info is None:
-        return None
-
-    _, mime_type = format_info
-    metadata = read_input_metadata(path) or {}
-    original_name = str(metadata.get("original_name") or path.name).strip() or path.name
-    created_at = str(metadata.get("created_at") or "").strip()
-    return {
-        "image_id": path.stem,
-        "source_type": "identity_transfer_role",
-        "role": role,
-        "original_name": original_name,
-        "stored_name": path.name,
-        "mime_type": mime_type,
-        "size_bytes": path.stat().st_size,
-        "width": int(width),
-        "height": int(height),
-        "preview_url": identity_transfer_path_to_web_path(path, role),
-        "created_at": created_at or None,
-    }
+    return upload_store.describe_stored_identity_transfer_role_image(
+        path,
+        role,
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        valid_upload_formats=VALID_UPLOAD_FORMATS,
+        preview_url_builder=identity_transfer_path_to_web_path,
+    )
 
 
 def current_identity_transfer_role_state(role: str) -> dict | None:
-    root = identity_transfer_role_root(role)
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        candidates = sorted(
-            path for path in root.iterdir()
-            if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS
-        )
-    except OSError:
-        return None
-
-    for candidate in candidates:
-        description = describe_stored_identity_transfer_role_image(candidate, role)
-        if description is not None:
-            return description
-    return None
+    return upload_store.current_identity_transfer_role_state(
+        identity_transfer_role_root(role),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        describe_callback=lambda path: describe_stored_identity_transfer_role_image(path, role),
+    )
 
 
 def build_identity_transfer_status_payload() -> dict:
-    roles_payload: list[dict] = []
-    blockers: list[str] = []
-    occupied_count = 0
-    for role in IDENTITY_TRANSFER_ROLES:
-        dir_accessible, dir_error = identity_transfer_dir_access_state(role)
-        current_item = current_identity_transfer_role_state(role)
-        required = role in IDENTITY_TRANSFER_REQUIRED_ROLES
-        occupied = dir_accessible and current_item is not None
-        if not dir_accessible:
-            blockers.append(dir_error or f"{role}_dir_not_accessible")
-        if occupied:
-            occupied_count += 1
-        elif required:
-            blockers.append(f"missing_{role}")
-        roles_payload.append(
-            {
-                "role": role,
-                "required": required,
-                "occupied": occupied,
-                "dir_accessible": dir_accessible,
-                "dir_error": None if dir_accessible else (dir_error or f"{role}_dir_not_accessible"),
-                "image": current_item,
-            }
-        )
-
-    return {
-        "status": "ok",
-        "v6_3_transfer_ready": not blockers,
-        "required_roles": list(IDENTITY_TRANSFER_REQUIRED_ROLES),
-        "optional_roles": [role for role in IDENTITY_TRANSFER_ROLES if role not in IDENTITY_TRANSFER_REQUIRED_ROLES],
-        "occupied_role_count": occupied_count,
-        "roles": roles_payload,
-        "blockers": blockers,
-    }
+    return identity_status.build_identity_transfer_status_payload(
+        roles=IDENTITY_TRANSFER_ROLES,
+        required_roles=IDENTITY_TRANSFER_REQUIRED_ROLES,
+        role_dir_state_resolver=identity_transfer_dir_access_state,
+        role_image_state_resolver=current_identity_transfer_role_state,
+    )
 
 
 def list_stored_multi_reference_images() -> list[dict]:
-    root = multi_reference_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        candidates = [
-            path for path in root.iterdir()
-            if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS
-        ]
-    except OSError:
-        return []
-
-    grouped: dict[int, list[dict]] = {}
-    for candidate in candidates:
-        description = describe_stored_multi_reference_image(candidate)
-        if description is None:
-            continue
-        grouped.setdefault(int(description["slot_index"]), []).append(description)
-
-    items: list[dict] = []
-    for slot_index in sorted(grouped):
-        slot_items = grouped[slot_index]
-        slot_items.sort(
-            key=lambda item: (
-                str(item.get("created_at") or ""),
-                str(item.get("image_id") or ""),
-            ),
-            reverse=True,
-        )
-        items.append(slot_items[0])
-    return items
+    return upload_store.list_stored_multi_reference_images(
+        multi_reference_root(),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        describe_callback=describe_stored_multi_reference_image,
+    )
 
 
 def build_multi_reference_status_payload() -> dict:
-    items = list_stored_multi_reference_images()
-    item_by_slot = {int(item["slot_index"]): item for item in items}
-    slots: list[dict] = []
-    for slot_index in range(1, MAX_MULTI_REFERENCE_SLOTS + 1):
-        current_item = item_by_slot.get(slot_index)
-        slots.append(
-            {
-                "slot_index": slot_index,
-                "occupied": current_item is not None,
-                "image": current_item,
-            }
-        )
-
-    reference_count = len(items)
-    return {
-        "status": "ok",
-        "max_slots": MAX_MULTI_REFERENCE_SLOTS,
-        "reference_count": reference_count,
-        "multi_reference_ready": reference_count >= 2,
-        "slots": slots,
-    }
+    return multi_reference_status.build_multi_reference_status_payload(
+        list_stored_multi_reference_images(),
+        max_slots=MAX_MULTI_REFERENCE_SLOTS,
+    )
 
 
 def find_first_free_multi_reference_slot() -> int | None:
-    for slot in build_multi_reference_status_payload()["slots"]:
-        if slot["occupied"] is not True:
-            return int(slot["slot_index"])
-    return None
+    return multi_reference_status.find_first_free_multi_reference_slot(
+        build_multi_reference_status_payload()
+    )
 
 
 def store_uploaded_image(original_name: str, payload: bytes, source_type: str) -> dict:
-    normalized_source_type = normalize_upload_source_type(source_type)
-    is_mask_upload = normalized_source_type == "mask"
-    root = mask_root() if is_mask_upload else input_root()
-    access_state = mask_dir_access_state() if is_mask_upload else input_dir_access_state()
-    dir_accessible, dir_error = access_state
-    if not dir_accessible:
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker=dir_error or ("mask_dir_not_accessible" if is_mask_upload else "input_dir_not_accessible"),
-            message="Input directory is not writable.",
-        )
-
-    image_info = inspect_image_upload(original_name, payload)
-    stored_payload = payload
-    if is_mask_upload:
-        normalized_payload, normalized_mask_info = normalize_mask_upload_payload(payload)
-        stored_payload = normalized_payload
-        image_info.update(normalized_mask_info)
-
-    image_id = f"{'mask' if is_mask_upload else 'input'}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
-    stored_name = f"{image_id}{image_info['extension']}"
-    final_path = root / stored_name
-    temp_path = root / f".{stored_name}.tmp"
-
-    try:
-        if is_mask_upload:
-            clear_stored_mask_images()
-        else:
-            clear_stored_input_images()
-        temp_path.write_bytes(stored_payload)
-        temp_path.replace(final_path)
-        write_input_metadata(
-            final_path,
-            {
-                "original_name": image_info["original_name"],
-                "source_type": normalized_source_type,
-            },
-        )
-    except OSError as exc:
-        temp_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="input_storage_error",
-            message="Uploaded image could not be stored.",
-        ) from exc
-
-    stored_image = describe_stored_mask_image(final_path) if is_mask_upload else describe_stored_input_image(final_path)
-    if stored_image is None or not is_accessible_output_file(final_path):
-        final_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="stored_image_not_accessible",
-            message="Stored image is not accessible.",
-        )
-
-    stored_image["original_name"] = image_info["original_name"]
-    stored_image["source_type"] = normalized_source_type
-    return stored_image
+    return upload_store.store_uploaded_image(
+        original_name,
+        payload,
+        source_type,
+        normalize_source_type=normalize_upload_source_type,
+        mask_root=mask_root,
+        input_root=input_root,
+        mask_dir_access_state=mask_dir_access_state,
+        input_dir_access_state=input_dir_access_state,
+        inspect_image_upload=inspect_image_upload,
+        normalize_mask_upload_payload=normalize_mask_upload_payload,
+        clear_stored_mask_images=clear_stored_mask_images,
+        clear_stored_input_images=clear_stored_input_images,
+        describe_stored_mask_image=describe_stored_mask_image,
+        describe_stored_input_image=describe_stored_input_image,
+        is_accessible_output_file=is_accessible_output_file,
+    )
 
 
 def store_reference_image(original_name: str, payload: bytes) -> dict:
-    dir_accessible, dir_error = reference_dir_access_state()
-    if not dir_accessible:
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker=dir_error or "reference_dir_not_accessible",
-            message="Reference directory is not writable.",
-        )
-
-    image_info = inspect_image_upload(original_name, payload)
-    image_id = f"reference-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
-    stored_name = f"{image_id}{image_info['extension']}"
-    final_path = reference_root() / stored_name
-    temp_path = reference_root() / f".{stored_name}.tmp"
-
-    try:
-        clear_stored_reference_images()
-        temp_path.write_bytes(payload)
-        temp_path.replace(final_path)
-        write_input_metadata(
-            final_path,
-            {
-                "original_name": image_info["original_name"],
-                "source_type": "reference",
-            },
-        )
-    except OSError as exc:
-        temp_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="reference_storage_error",
-            message="Uploaded reference image could not be stored.",
-        ) from exc
-
-    stored_image = describe_stored_reference_image(final_path)
-    if stored_image is None or not is_accessible_output_file(final_path):
-        final_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="stored_reference_not_accessible",
-            message="Stored reference image is not accessible.",
-        )
-
-    stored_image["original_name"] = image_info["original_name"]
-    stored_image["source_type"] = "reference"
-    return stored_image
+    return upload_store.store_reference_image(
+        original_name,
+        payload,
+        reference_root=reference_root,
+        reference_dir_access_state=reference_dir_access_state,
+        inspect_image_upload=inspect_image_upload,
+        clear_stored_reference_images=clear_stored_reference_images,
+        describe_stored_reference_image=describe_stored_reference_image,
+        is_accessible_output_file=is_accessible_output_file,
+    )
 
 
 def store_multi_reference_image(original_name: str, payload: bytes, *, slot_index: int | None) -> dict:
-    dir_accessible, dir_error = multi_reference_dir_access_state()
-    if not dir_accessible:
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker=dir_error or "multi_reference_dir_not_accessible",
-            message="Multi-reference directory is not writable.",
-        )
-
-    image_info = inspect_image_upload(original_name, payload)
-    resolved_slot_index = slot_index if slot_index is not None else find_first_free_multi_reference_slot()
-    if resolved_slot_index is None:
-        raise UploadRequestError(
-            status_code=HTTPStatus.CONFLICT,
-            error_type="invalid_request",
-            blocker="multi_reference_slots_full",
-            message="All multi-reference slots are occupied. Choose a slot to replace.",
-        )
-
-    created_at = utc_now_iso()
-    image_id = f"multi-reference-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
-    stored_name = f"{image_id}{image_info['extension']}"
-    final_path = multi_reference_root() / stored_name
-    temp_path = multi_reference_root() / f".{stored_name}.tmp"
-
-    try:
-        clear_stored_multi_reference_images(slot_index=resolved_slot_index)
-        temp_path.write_bytes(payload)
-        temp_path.replace(final_path)
-        write_input_metadata(
-            final_path,
-            {
-                "original_name": image_info["original_name"],
-                "source_type": "multi_reference",
-                "slot_index": resolved_slot_index,
-                "created_at": created_at,
-            },
-        )
-    except OSError as exc:
-        temp_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="multi_reference_storage_error",
-            message="Uploaded multi-reference image could not be stored.",
-        ) from exc
-
-    stored_image = describe_stored_multi_reference_image(final_path)
-    if stored_image is None or not is_accessible_output_file(final_path):
-        final_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="stored_multi_reference_not_accessible",
-            message="Stored multi-reference image is not accessible.",
-        )
-
-    stored_image["original_name"] = image_info["original_name"]
-    stored_image["source_type"] = "multi_reference"
-    stored_image["slot_index"] = resolved_slot_index
-    stored_image["created_at"] = created_at
-    return stored_image
+    return upload_store.store_multi_reference_image(
+        original_name,
+        payload,
+        slot_index=slot_index,
+        multi_reference_root=multi_reference_root,
+        multi_reference_dir_access_state=multi_reference_dir_access_state,
+        inspect_image_upload=inspect_image_upload,
+        find_first_free_multi_reference_slot=find_first_free_multi_reference_slot,
+        clear_stored_multi_reference_images=clear_stored_multi_reference_images,
+        describe_stored_multi_reference_image=describe_stored_multi_reference_image,
+        is_accessible_output_file=is_accessible_output_file,
+        utc_now_iso=utc_now_iso,
+    )
 
 
 def store_identity_transfer_role_image(original_name: str, payload: bytes, *, role: str) -> dict:
-    dir_accessible, dir_error = identity_transfer_dir_access_state(role)
-    if not dir_accessible:
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker=dir_error or "identity_transfer_role_dir_not_accessible",
-            message="Identity transfer role directory is not writable.",
-        )
-
-    image_info = inspect_image_upload(original_name, payload)
-    created_at = utc_now_iso()
-    image_id = f"{role}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
-    stored_name = f"{image_id}{image_info['extension']}"
-    final_path = identity_transfer_role_root(role) / stored_name
-    temp_path = identity_transfer_role_root(role) / f".{stored_name}.tmp"
-
-    try:
-        clear_stored_identity_transfer_role_images(role)
-        temp_path.write_bytes(payload)
-        temp_path.replace(final_path)
-        write_input_metadata(
-            final_path,
-            {
-                "original_name": image_info["original_name"],
-                "source_type": "identity_transfer_role",
-                "role": role,
-                "created_at": created_at,
-            },
-        )
-    except OSError as exc:
-        temp_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="identity_transfer_role_storage_error",
-            message="Uploaded identity transfer role image could not be stored.",
-        ) from exc
-
-    stored_image = describe_stored_identity_transfer_role_image(final_path, role)
-    if stored_image is None or not is_accessible_output_file(final_path):
-        final_path.unlink(missing_ok=True)
-        input_metadata_path(final_path).unlink(missing_ok=True)
-        raise UploadRequestError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="upload_error",
-            blocker="stored_identity_transfer_role_not_accessible",
-            message="Stored identity transfer role image is not accessible.",
-        )
-
-    stored_image["original_name"] = image_info["original_name"]
-    stored_image["source_type"] = "identity_transfer_role"
-    stored_image["role"] = role
-    stored_image["created_at"] = created_at
-    return stored_image
+    return upload_store.store_identity_transfer_role_image(
+        original_name,
+        payload,
+        role=role,
+        identity_transfer_role_root=identity_transfer_role_root,
+        identity_transfer_dir_access_state=identity_transfer_dir_access_state,
+        inspect_image_upload=inspect_image_upload,
+        clear_stored_identity_transfer_role_images=clear_stored_identity_transfer_role_images,
+        describe_stored_identity_transfer_role_image=describe_stored_identity_transfer_role_image,
+        is_accessible_output_file=is_accessible_output_file,
+        utc_now_iso=utc_now_iso,
+    )
 
 
 def describe_stored_multi_reference_image(path: Path) -> dict | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS:
-        return None
-    try:
-        with Image.open(path) as image:
-            image.load()
-            format_name = str(image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, OSError):
-        return None
-
-    format_info = VALID_UPLOAD_FORMATS.get(format_name)
-    if format_info is None:
-        return None
-
-    _, mime_type = format_info
-    metadata = read_input_metadata(path) or {}
-    try:
-        slot_index = parse_required_multi_reference_slot_index(metadata.get("slot_index"))
-    except ValueError:
-        return None
-    original_name = str(metadata.get("original_name") or path.name).strip() or path.name
-    created_at = str(metadata.get("created_at") or "").strip()
-    return {
-        "image_id": path.stem,
-        "source_type": "multi_reference",
-        "slot_index": slot_index,
-        "original_name": original_name,
-        "stored_name": path.name,
-        "mime_type": mime_type,
-        "size_bytes": path.stat().st_size,
-        "width": int(width),
-        "height": int(height),
-        "preview_url": multi_reference_path_to_web_path(path),
-        "created_at": created_at or None,
-    }
+    return upload_store.describe_stored_multi_reference_image(
+        path,
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        valid_upload_formats=VALID_UPLOAD_FORMATS,
+        preview_url_builder=multi_reference_path_to_web_path,
+        required_slot_index_parser=parse_required_multi_reference_slot_index,
+    )
 
 
 def clear_current_input_image() -> None:
@@ -2144,186 +2172,90 @@ def clear_current_mask_image() -> None:
 
 
 def inspect_result_image(path: Path) -> dict:
-    try:
-        with Image.open(path) as image:
-            image.load()
-            format_name = str(image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, OSError) as exc:
-        raise ResultStoreError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="output_file_missing",
-            blocker="generated_file_not_accessible",
-            message="Generated result image is not readable.",
-        ) from exc
-
-    format_info = VALID_UPLOAD_FORMATS.get(format_name)
-    extension = path.suffix.lower()
-    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    if format_info is not None:
-        extension, mime_type = format_info
-
-    return {
-        "extension": extension if extension in VALID_UPLOAD_EXTENSIONS else ".png",
-        "mime_type": mime_type,
-        "width": int(width),
-        "height": int(height),
-        "size_bytes": path.stat().st_size,
-    }
+    return result_output.inspect_result_image(
+        path,
+        valid_upload_formats=VALID_UPLOAD_FORMATS,
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+    )
 
 
 def write_result_metadata(path: Path, metadata: dict) -> None:
-    temp_path = path.with_name(f".{path.name}.tmp")
-    temp_path.write_text(json.dumps(metadata, ensure_ascii=True, separators=(",", ":")), encoding="utf-8")
-    temp_path.replace(path)
+    result_output.write_result_metadata(path, metadata)
 
 
 def get_result_retention_limit() -> int:
-    raw_value = os.environ.get(RESULT_RETENTION_ENV_VAR)
-    if raw_value is None:
-        return RESULT_RETENTION_DEFAULT
+    return result_output.get_result_retention_limit(
+        raw_value=os.environ.get(RESULT_RETENTION_ENV_VAR),
+        default_limit=RESULT_RETENTION_DEFAULT,
+    )
 
-    normalized_value = raw_value.strip()
-    if not normalized_value:
-        return RESULT_RETENTION_DEFAULT
 
-    try:
-        parsed_value = int(normalized_value)
-    except ValueError:
-        return RESULT_RETENTION_DEFAULT
-
-    return parsed_value if parsed_value >= 1 else RESULT_RETENTION_DEFAULT
+def is_managed_result_id(value: object) -> bool:
+    return result_output.is_managed_result_id(value, pattern=MANAGED_RESULT_ID_PATTERN)
 
 
 def resolve_result_mode_name(render_mode: object, *, use_input_image: bool, use_inpainting: bool) -> str:
-    normalized_mode = str(render_mode or "").strip().lower()
-    if normalized_mode == "placeholder":
-        return "placeholder"
-    if normalized_mode == IDENTITY_REFERENCE_MODE:
-        return IDENTITY_REFERENCE_MODE
-    if normalized_mode == IDENTITY_MULTI_REFERENCE_MODE:
-        return IDENTITY_MULTI_REFERENCE_MODE
-    if normalized_mode == IDENTITY_TRANSFER_MODE:
-        return IDENTITY_TRANSFER_MODE
-    if use_inpainting:
-        return "inpainting"
-    if use_input_image:
-        return "img2img"
-    return "txt2img"
+    return result_output.resolve_result_mode_name(
+        render_mode,
+        use_input_image=use_input_image,
+        use_inpainting=use_inpainting,
+        identity_research_mode=IDENTITY_RESEARCH_MODE,
+        identity_reference_mode=IDENTITY_REFERENCE_MODE,
+        identity_multi_reference_mode=IDENTITY_MULTI_REFERENCE_MODE,
+        identity_transfer_mode=IDENTITY_TRANSFER_MODE,
+        identity_transfer_mask_hybrid_mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+    )
 
 
 def build_result_metadata_item(metadata_payload: dict, image_path: Path) -> dict | None:
-    result_id = str(metadata_payload.get("result_id") or "").strip()
-    file_name = str(metadata_payload.get("file_name") or "").strip()
-    created_at = str(metadata_payload.get("created_at") or "").strip()
-    if not result_id or not file_name or not created_at:
-        return None
-
-    candidate = (result_root() / Path(file_name).name).resolve()
-    try:
-        candidate.relative_to(result_root())
-    except ValueError:
-        return None
-
-    if candidate != image_path.resolve():
-        return None
-    if not is_accessible_output_file(candidate):
-        return None
-
-    try:
-        image_info = inspect_result_image(candidate)
-    except ResultStoreError:
-        return None
-    return {
-        "result_id": result_id,
-        "created_at": created_at,
-        "mode": str(metadata_payload.get("mode") or "txt2img").strip() or "txt2img",
-        "prompt": str(metadata_payload.get("prompt") or "").strip(),
-        "checkpoint": str(metadata_payload.get("checkpoint") or "").strip() or None,
-        "width": image_info["width"],
-        "height": image_info["height"],
-        "file_name": candidate.name,
-        "mime_type": image_info["mime_type"],
-        "size_bytes": image_info["size_bytes"],
-        "preview_url": result_path_to_web_path(candidate),
-        "download_url": result_id_to_download_url(result_id),
-        "reference_count": metadata_payload.get("reference_count") if isinstance(metadata_payload.get("reference_count"), int) else None,
-        "reference_slots": metadata_payload.get("reference_slots") if isinstance(metadata_payload.get("reference_slots"), list) else None,
-        "reference_image_ids": metadata_payload.get("reference_image_ids") if isinstance(metadata_payload.get("reference_image_ids"), list) else None,
-        "multi_reference_strategy": str(metadata_payload.get("multi_reference_strategy") or "").strip() or None,
-        "used_roles": metadata_payload.get("used_roles") if isinstance(metadata_payload.get("used_roles"), list) else None,
-        "pose_reference_present": metadata_payload.get("pose_reference_present") if isinstance(metadata_payload.get("pose_reference_present"), bool) else None,
-        "pose_reference_used": metadata_payload.get("pose_reference_used") if isinstance(metadata_payload.get("pose_reference_used"), bool) else None,
-        "transfer_mask_present": metadata_payload.get("transfer_mask_present") if isinstance(metadata_payload.get("transfer_mask_present"), bool) else None,
-        "transfer_mask_used": metadata_payload.get("transfer_mask_used") if isinstance(metadata_payload.get("transfer_mask_used"), bool) else None,
-        "identity_head_reference_image_id": str(metadata_payload.get("identity_head_reference_image_id") or "").strip() or None,
-        "target_body_image_id": str(metadata_payload.get("target_body_image_id") or "").strip() or None,
-        "pose_reference_image_id": str(metadata_payload.get("pose_reference_image_id") or "").strip() or None,
-        "transfer_mask_image_id": str(metadata_payload.get("transfer_mask_image_id") or "").strip() or None,
-        "identity_transfer_strategy": str(metadata_payload.get("identity_transfer_strategy") or "").strip() or None,
-    }
+    return result_output.build_result_metadata_item(
+        metadata_payload,
+        image_path,
+        result_root=result_root(),
+        is_accessible_output_file=is_accessible_output_file,
+        inspect_result_image=inspect_result_image,
+        retention_limit=get_result_retention_limit(),
+        default_retention_limit=RESULT_RETENTION_DEFAULT,
+        preview_url_builder=result_path_to_web_path,
+        download_url_builder=result_id_to_download_url,
+    )
 
 
 def list_result_store_records() -> list[dict]:
-    root = result_root()
-    root.mkdir(parents=True, exist_ok=True)
-
-    records: list[dict] = []
-    for metadata_path in root.iterdir():
-        if not metadata_path.is_file() or metadata_path.suffix.lower() != ".json":
-            continue
-
-        payload, error = read_json_file_detail(metadata_path)
-        if payload is None or error is not None:
-            continue
-
-        result_id = str(payload.get("result_id") or "").strip()
-        file_name = str(payload.get("file_name") or "").strip()
-        created_at = str(payload.get("created_at") or "").strip()
-        if not result_id or not file_name or not created_at:
-            continue
-
-        image_path = (root / Path(file_name).name).resolve()
-        try:
-            image_path.relative_to(root)
-        except ValueError:
-            continue
-
-        records.append(
-            {
-                "result_id": result_id,
-                "created_at": created_at,
-                "metadata_path": metadata_path.resolve(),
-                "image_path": image_path,
-            }
-        )
-
-    records.sort(
-        key=lambda item: (
-            str(item.get("created_at") or ""),
-            str(item.get("result_id") or ""),
-        ),
-        reverse=True,
+    return result_output.list_result_store_records(
+        result_root=result_root(),
+        read_json_file_detail=read_json_file_detail,
+        is_accessible_output_file=is_accessible_output_file,
     )
-    return records
 
 
-def enforce_result_retention(*, retain_count: int | None = None) -> None:
-    effective_limit = retain_count if retain_count is not None else get_result_retention_limit()
-    if effective_limit < 1:
-        effective_limit = RESULT_RETENTION_DEFAULT
+def cleanup_result_store_housekeeping(
+    *,
+    valid_result_ids: set[str] | None = None,
+    stale_tmp_age_seconds: int = RESULT_TEMP_STALE_SECONDS,
+) -> dict:
+    return result_output.cleanup_result_store_housekeeping(
+        result_root=result_root(),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+        is_managed_result_id=is_managed_result_id,
+        managed_result_tmp_pattern=MANAGED_RESULT_TMP_FILE_PATTERN,
+        valid_result_ids=valid_result_ids,
+        stale_tmp_age_seconds=stale_tmp_age_seconds,
+        error_logger=lambda message: print(message, file=sys.stderr, flush=True),
+    )
 
-    stale_records = list_result_store_records()[effective_limit:]
-    for record in stale_records:
-        for target_path in (record["metadata_path"], record["image_path"]):
-            try:
-                target_path.unlink(missing_ok=True)
-            except OSError as exc:
-                print(
-                    f"[result-retention] failed to remove {target_path.name}: {exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+
+def enforce_result_retention(*, retain_count: int | None = None) -> dict:
+    return result_output.enforce_result_retention(
+        retain_count=retain_count,
+        default_retention_limit=RESULT_RETENTION_DEFAULT,
+        list_result_store_records=list_result_store_records,
+        is_managed_result_id=is_managed_result_id,
+        cleanup_result_store_housekeeping=lambda valid_result_ids: cleanup_result_store_housekeeping(
+            valid_result_ids=valid_result_ids
+        ),
+        error_logger=lambda message: print(message, file=sys.stderr, flush=True),
+    )
 
 
 def capture_generated_result(
@@ -2336,144 +2268,120 @@ def capture_generated_result(
     use_inpainting: bool,
     extra_metadata: dict | None = None,
 ) -> dict:
-    results_dir_accessible, results_dir_error = results_dir_access_state()
-    if not results_dir_accessible:
-        raise ResultStoreError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="api_error",
-            blocker=results_dir_error or "results_dir_not_accessible",
-            message="Results directory is not accessible.",
-        )
-
-    source_output, output_error = resolve_internal_output_path(output_file)
-    if source_output is None or not is_accessible_output_file(source_output):
-        raise ResultStoreError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="output_file_missing",
-            blocker=output_error or "generated_file_not_accessible",
-            message="Generated result image is not accessible.",
-        )
-
-    image_info = inspect_result_image(source_output)
-    result_id = f"result-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
-    file_name = f"{result_id}{image_info['extension']}"
-    final_path = result_root() / file_name
-    temp_path = result_root() / f".{file_name}.tmp"
-    metadata_path = result_root() / f"{result_id}.json"
-    created_at = utc_now_iso()
-    metadata_payload = {
-        "result_id": result_id,
-        "created_at": created_at,
-        "mode": resolve_result_mode_name(
+    return result_output.capture_generated_result(
+        output_file,
+        render_mode=render_mode,
+        prompt=prompt,
+        checkpoint=checkpoint,
+        use_input_image=use_input_image,
+        use_inpainting=use_inpainting,
+        extra_metadata=extra_metadata,
+        results_dir_access_state=results_dir_access_state,
+        resolve_internal_output_path=resolve_internal_output_path,
+        is_accessible_output_file=is_accessible_output_file,
+        inspect_result_image=inspect_result_image,
+        result_root=result_root(),
+        utc_now_iso=utc_now_iso,
+        write_result_metadata=write_result_metadata,
+        build_result_metadata_item=build_result_metadata_item,
+        resolve_result_mode_name=lambda render_mode, use_input_image, use_inpainting: resolve_result_mode_name(
             render_mode,
             use_input_image=use_input_image,
             use_inpainting=use_inpainting,
         ),
-        "prompt": prompt,
-        "checkpoint": checkpoint or None,
-        "width": image_info["width"],
-        "height": image_info["height"],
-        "file_name": file_name,
-    }
-    if isinstance(extra_metadata, dict) and extra_metadata:
-        metadata_payload.update(extra_metadata)
-
-    try:
-        shutil.copyfile(source_output, temp_path)
-        temp_path.replace(final_path)
-        write_result_metadata(metadata_path, metadata_payload)
-    except OSError as exc:
-        temp_path.unlink(missing_ok=True)
-        final_path.unlink(missing_ok=True)
-        metadata_path.unlink(missing_ok=True)
-        raise ResultStoreError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="api_error",
-            blocker="results_storage_error",
-            message="Generated result could not be stored.",
-        ) from exc
-
-    metadata_item = build_result_metadata_item(metadata_payload, final_path)
-    if metadata_item is None:
-        final_path.unlink(missing_ok=True)
-        metadata_path.unlink(missing_ok=True)
-        raise ResultStoreError(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            error_type="api_error",
-            blocker="results_metadata_invalid",
-            message="Stored result metadata is invalid.",
-        )
-
-    enforce_result_retention()
-    return metadata_item
+        enforce_result_retention=enforce_result_retention,
+    )
 
 
 def read_result_item(metadata_path: Path) -> dict | None:
-    payload, error = read_json_file_detail(metadata_path)
-    if payload is None or error is not None:
-        return None
-
-    file_name = str(payload.get("file_name") or "").strip()
-    if not file_name:
-        return None
-
-    image_path = (result_root() / Path(file_name).name).resolve()
-    try:
-        image_path.relative_to(result_root())
-    except ValueError:
-        return None
-
-    return build_result_metadata_item(payload, image_path)
+    return result_output.read_result_item(
+        metadata_path,
+        read_json_file_detail=read_json_file_detail,
+        result_root=result_root(),
+        build_result_metadata_item=build_result_metadata_item,
+    )
 
 
 def list_stored_results(*, limit: int = RESULTS_DEFAULT_LIMIT) -> list[dict]:
-    root = result_root()
-    root.mkdir(parents=True, exist_ok=True)
-    metadata_paths = sorted(
-        (
-            path for path in root.iterdir()
-            if path.is_file() and path.suffix.lower() == ".json"
-        ),
-        reverse=True,
+    return result_output.list_stored_results(
+        limit=limit,
+        result_root=result_root(),
+        read_result_item=read_result_item,
     )
-
-    items: list[dict] = []
-    for metadata_path in metadata_paths:
-        item = read_result_item(metadata_path)
-        if item is None:
-            continue
-        items.append(item)
-
-    items.sort(
-        key=lambda item: (
-            str(item.get("created_at") or ""),
-            str(item.get("result_id") or ""),
-        ),
-        reverse=True,
-    )
-    return items[:limit]
 
 
 def resolve_result_download_item(result_id: str) -> tuple[dict | None, Path | None]:
-    metadata_path = (result_root() / f"{Path(result_id).name}.json").resolve()
-    try:
-        metadata_path.relative_to(result_root())
-    except ValueError:
-        return None, None
+    return result_output.resolve_result_download_item(
+        result_id,
+        result_root=result_root(),
+        read_result_item=read_result_item,
+        is_accessible_output_file=is_accessible_output_file,
+    )
 
-    item = read_result_item(metadata_path)
-    if item is None:
-        return None, None
 
-    image_path = (result_root() / item["file_name"]).resolve()
-    try:
-        image_path.relative_to(result_root())
-    except ValueError:
-        return None, None
+def sanitize_export_token(value: object, *, fallback: str, max_length: int) -> str:
+    return result_output.sanitize_export_token(value, fallback=fallback, max_length=max_length)
 
-    if not is_accessible_output_file(image_path):
-        return None, None
-    return item, image_path
+
+def count_export_store_files() -> int:
+    return result_output.count_export_store_files(
+        export_root=export_root(),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+    )
+
+
+def reserve_export_target_path(base_file_name: str) -> Path:
+    return result_output.reserve_export_target_path(base_file_name, export_root=export_root())
+
+
+def build_result_export_file_name(result_item: dict) -> str:
+    return result_output.build_result_export_file_name(
+        result_item,
+        sanitize_export_token=lambda value, fallback, max_length: sanitize_export_token(
+            value,
+            fallback=fallback,
+            max_length=max_length,
+        ),
+        valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,
+    )
+
+
+def build_results_storage_summary(*, app_results_count: int, cleanup_report: dict | None = None) -> dict:
+    return result_output.build_results_storage_summary(
+        app_results_count=app_results_count,
+        cleanup_report=cleanup_report,
+        retention_limit=get_result_retention_limit(),
+        default_retention_limit=RESULT_RETENTION_DEFAULT,
+        results_dir=repo_relative_path(result_root()),
+        exports_dir=repo_relative_path(export_root()),
+        exports_dir_access_state=exports_dir_access_state,
+        count_export_store_files=count_export_store_files,
+    )
+
+
+def create_result_export(result_id: str) -> dict:
+    return result_output.create_result_export(
+        result_id,
+        results_dir_access_state=results_dir_access_state,
+        exports_dir_access_state=exports_dir_access_state,
+        resolve_result_download_item=resolve_result_download_item,
+        reserve_export_target_path=reserve_export_target_path,
+        build_result_export_file_name=build_result_export_file_name,
+        write_result_metadata=write_result_metadata,
+        export_url_builder=export_path_to_web_path,
+        utc_now_iso=utc_now_iso,
+    )
+
+
+def delete_stored_result(result_id: str) -> dict:
+    return result_output.delete_stored_result(
+        result_id,
+        is_managed_result_id=is_managed_result_id,
+        results_dir_access_state=results_dir_access_state,
+        resolve_result_download_item=resolve_result_download_item,
+        result_root=result_root(),
+        list_result_store_records=list_result_store_records,
+    )
 
 
 def resolve_generation_request(
@@ -2503,6 +2411,77 @@ def resolve_generation_request(
         return "sdxl", None if (use_input_image or use_inpainting) else MINIMAL_WORKFLOW_NAME, selected_checkpoint
 
     return "placeholder", PLACEHOLDER_WORKFLOW_NAME, None
+
+
+def checkpoint_token(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def resolve_general_generate_tuning(
+    *,
+    checkpoint: str | None,
+    use_inpainting: bool = False,
+    use_edit_image: bool = False,
+    extra_negative_prompt: str | None = None,
+    cfg_override: float | None = None,
+    steps_override: int | None = None,
+    inpaint_negative_suffix: str | None = None,
+) -> tuple[float, int, str]:
+    token = checkpoint_token(checkpoint)
+    if token in ANIME_MOTIF_TUNING_CHECKPOINTS:
+        cfg = ANIME_MOTIF_TUNING_CFG
+        steps = ANIME_MOTIF_TUNING_STEPS
+        negative_prompt = f"{DEFAULT_NEGATIVE_PROMPT}, {ANIME_MOTIF_TUNING_NEGATIVE_SUFFIX}"
+    else:
+        cfg = DEFAULT_CFG
+        steps = DEFAULT_STEPS
+        negative_prompt = DEFAULT_NEGATIVE_PROMPT
+
+    if use_edit_image:
+        steps = min(steps, EDIT_STEPS)
+
+    if use_inpainting:
+        if token in ANIME_MOTIF_TUNING_CHECKPOINTS:
+            cfg = ANIME_INPAINT_CFG
+            steps = ANIME_INPAINT_STEPS
+        else:
+            cfg = PHOTO_INPAINT_CFG
+            steps = PHOTO_INPAINT_STEPS
+        if isinstance(cfg_override, (int, float)):
+            cfg = float(cfg_override)
+        if isinstance(steps_override, int) and steps_override > 0:
+            steps = steps_override
+        effective_inpaint_negative_suffix = inpaint_negative_suffix.strip() if isinstance(inpaint_negative_suffix, str) and inpaint_negative_suffix.strip() else INPAINT_LOCALITY_NEGATIVE_SUFFIX
+        negative_prompt = f"{negative_prompt}, {effective_inpaint_negative_suffix}"
+    elif use_edit_image:
+        negative_prompt = f"{negative_prompt}, {EDIT_IMAGE_PRESERVATION_NEGATIVE_SUFFIX}"
+
+    if isinstance(extra_negative_prompt, str) and extra_negative_prompt.strip():
+        negative_prompt = f"{negative_prompt}, {extra_negative_prompt.strip()}"
+
+    return (
+        cfg,
+        steps,
+        negative_prompt,
+    )
+
+
+def resolve_render_prompt(
+    prompt: str,
+    *,
+    use_inpainting: bool = False,
+    use_edit_image: bool = False,
+    inpaint_prompt_suffix: str | None = None,
+) -> str:
+    normalized_prompt = str(prompt or "").strip()
+    if use_inpainting:
+        effective_suffix = inpaint_prompt_suffix.strip() if isinstance(inpaint_prompt_suffix, str) and inpaint_prompt_suffix.strip() else INPAINT_LOCAL_EDIT_PROMPT_SUFFIX
+        return f"{normalized_prompt}, {effective_suffix}"
+    if use_edit_image:
+        return f"{normalized_prompt}, {EDIT_IMAGE_PRESERVATION_PROMPT_SUFFIX}"
+    if not use_inpainting:
+        return normalized_prompt
+    return normalized_prompt
 
 
 def resolve_requested_input_image(image_id: object) -> tuple[dict, Path]:
@@ -2602,52 +2581,18 @@ def finalize_generate_result(
     use_inpainting: bool,
     extra_metadata: dict | None = None,
 ) -> tuple[HTTPStatus, dict]:
-    mode = result.get("mode")
-    prompt_id = result.get("prompt_id")
-    status = str(result.get("status"))
-
-    if status != "ok":
-        return HTTPStatus.BAD_REQUEST, build_generate_response(
-            status=status,
-            mode=mode,
-            output_file=None,
-            error_type=result.get("error_type"),
-            blocker=result.get("blocker"),
-            prompt_id=prompt_id,
-            request_id=request_id,
-        )
-
-    try:
-        stored_result = capture_generated_result(
-            result.get("output_file"),
-            render_mode=mode,
-            prompt=prompt,
-            checkpoint=checkpoint,
-            use_input_image=use_input_image,
-            use_inpainting=use_inpainting,
-            extra_metadata=extra_metadata,
-        )
-    except ResultStoreError as exc:
-        return exc.status_code, build_error_response(
-            mode=mode,
-            error_type=exc.error_type,
-            blocker=exc.blocker,
-            prompt_id=prompt_id,
-            request_id=request_id,
-        )
-
-    response_payload = build_generate_response(
-        status="ok",
-        mode=mode,
-        output_file=stored_result["preview_url"],
-        error_type=None,
-        blocker=None,
-        prompt_id=prompt_id,
-        request_id=request_id,
+    return result_output.finalize_generate_result(
+        result,
+        request_id,
+        prompt=prompt,
+        checkpoint=checkpoint,
+        use_input_image=use_input_image,
+        use_inpainting=use_inpainting,
+        extra_metadata=extra_metadata,
+        capture_generated_result=capture_generated_result,
+        build_generate_response=build_generate_response,
+        build_error_response=build_error_response,
     )
-    response_payload["result_id"] = stored_result["result_id"]
-    response_payload["download_url"] = stored_result["download_url"]
-    return HTTPStatus.OK, response_payload
 
 
 def resolve_runner_state(
@@ -2735,36 +2680,29 @@ class AppServer(ThreadingHTTPServer):
             runner_error=runner_file_error,
             comfyui_reachable=comfyui_reachable,
         )
-
-        payload = {
-            "service": "local-image-app",
-            "status": "ok",
-            "runner": runner_payload,
-            "runner_status": runner_status,
-            "runner_error": runner_state_error,
-            "comfyui_reachable": comfyui_reachable,
-            "comfyui_error": comfyui_error,
-            "api_error": comfyui_error,
-            "output_dir_accessible": output_dir_accessible,
-            "output_dir_error": output_dir_error,
-            "input_dir_accessible": input_dir_accessible,
-            "input_dir_error": input_dir_error,
-            "reference_dir_accessible": reference_dir_accessible,
-            "reference_dir_error": reference_dir_error,
-            "mask_dir_accessible": mask_dir_accessible,
-            "mask_dir_error": mask_dir_error,
-            "results_dir_accessible": results_dir_accessible,
-            "results_dir_error": results_dir_error,
-            "input_image": current_input_image_state(),
-            "reference_image": current_reference_image_state(),
-            "mask_image": current_mask_image_state(),
-            "sdxl_available": inventory.get("sdxl_count", 0) >= 1,
-            "selected_checkpoint": inventory.get("selected"),
-            "inventory": inventory,
-        }
-        payload.update(text_service_state)
-        payload.update(self.render_state())
-        return payload
+        return app_status.build_system_state_payload(
+            runner_payload=runner_payload,
+            runner_status=runner_status,
+            runner_error=runner_state_error,
+            comfyui_reachable=comfyui_reachable,
+            comfyui_error=comfyui_error,
+            output_dir_accessible=output_dir_accessible,
+            output_dir_error=output_dir_error,
+            input_dir_accessible=input_dir_accessible,
+            input_dir_error=input_dir_error,
+            reference_dir_accessible=reference_dir_accessible,
+            reference_dir_error=reference_dir_error,
+            mask_dir_accessible=mask_dir_accessible,
+            mask_dir_error=mask_dir_error,
+            results_dir_accessible=results_dir_accessible,
+            results_dir_error=results_dir_error,
+            input_image=current_input_image_state(),
+            reference_image=current_reference_image_state(),
+            mask_image=current_mask_image_state(),
+            inventory=inventory,
+            text_service_state=text_service_state,
+            render_state=self.render_state(),
+        )
 
 
 class AppRequestHandler(BaseHTTPRequestHandler):
@@ -2779,12 +2717,34 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/health":
             self.send_json(HTTPStatus.OK, self.server.collect_system_state())
             return
+        if parsed.path == TEXT_CHAT_SLOTS_PATH:
+            self.handle_text_chat_slots()
+            return
+        text_chat_slot_request = resolve_text_chat_slot_request_path(parsed.path)
+        if text_chat_slot_request is not None and text_chat_slot_request[1] is None:
+            self.handle_text_chat_slot_detail(text_chat_slot_request[0])
+            return
         if parsed.path == IDENTITY_REFERENCE_READINESS_PATH:
             readiness_state = build_identity_runtime_state()
             self.send_json(
-                HTTPStatus.OK if readiness_state.get("ok") is True else resolve_identity_reference_status_code(
-                    error_type=readiness_state.get("error_type") if isinstance(readiness_state.get("error_type"), str) else None,
-                    blocker=readiness_state.get("blocker") if isinstance(readiness_state.get("blocker"), str) else None,
+                identity_status.resolve_identity_readiness_http_status(
+                    readiness_state,
+                    status_code_resolver=resolve_identity_reference_status_code,
+                ),
+                readiness_state,
+            )
+            return
+        if parsed.path == IDENTITY_RESEARCH_READINESS_PATH:
+            provider_values = parse_qs(parsed.query).get("provider", [])
+            provider = provider_values[0] if provider_values else None
+            readiness_state = build_identity_research_runtime_state(provider=provider)
+            if provider is None:
+                self.send_json(HTTPStatus.OK, readiness_state)
+                return
+            self.send_json(
+                identity_status.resolve_identity_readiness_http_status(
+                    readiness_state,
+                    status_code_resolver=resolve_identity_reference_status_code,
                 ),
                 readiness_state,
             )
@@ -2806,9 +2766,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == MULTI_REFERENCE_READINESS_PATH:
             readiness_state = build_identity_multi_reference_runtime_state()
             self.send_json(
-                HTTPStatus.OK if readiness_state.get("ok") is True else resolve_identity_multi_reference_status_code(
-                    error_type=readiness_state.get("error_type") if isinstance(readiness_state.get("error_type"), str) else None,
-                    blocker=readiness_state.get("blocker") if isinstance(readiness_state.get("blocker"), str) else None,
+                multi_reference_status.resolve_multi_reference_readiness_http_status(
+                    readiness_state,
+                    status_code_resolver=resolve_identity_multi_reference_status_code,
                 ),
                 readiness_state,
             )
@@ -2819,9 +2779,19 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == IDENTITY_TRANSFER_READINESS_PATH:
             readiness_state = build_identity_transfer_runtime_state()
             self.send_json(
-                HTTPStatus.OK if readiness_state.get("ok") is True else resolve_identity_transfer_generate_status_code(
-                    error_type=readiness_state.get("error_type") if isinstance(readiness_state.get("error_type"), str) else None,
-                    blocker=readiness_state.get("blocker") if isinstance(readiness_state.get("blocker"), str) else None,
+                identity_status.resolve_identity_readiness_http_status(
+                    readiness_state,
+                    status_code_resolver=resolve_identity_transfer_generate_status_code,
+                ),
+                readiness_state,
+            )
+            return
+        if parsed.path == IDENTITY_TRANSFER_MASK_HYBRID_READINESS_PATH:
+            readiness_state = build_identity_transfer_mask_hybrid_runtime_state()
+            self.send_json(
+                identity_status.resolve_identity_readiness_http_status(
+                    readiness_state,
+                    status_code_resolver=resolve_identity_transfer_generate_status_code,
                 ),
                 readiness_state,
             )
@@ -2853,6 +2823,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith(RESULT_FILE_ROUTE_PREFIX):
             self.serve_result(parsed.path)
             return
+        if parsed.path.startswith(EXPORT_FILE_ROUTE_PREFIX):
+            self.serve_export(parsed.path)
+            return
         if parsed.path.startswith("/output/"):
             self.serve_output(parsed.path)
             return
@@ -2860,6 +2833,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == RESULT_DELETE_PATH:
+            self.handle_result_delete()
+            return
         if parsed.path == INPUT_IMAGE_RESET_PATH:
             try:
                 clear_current_input_image()
@@ -3028,11 +3004,42 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == MASK_IMAGE_EDITOR_PATH:
             self.handle_mask_editor_save()
             return
+        if parsed.path == TEXT_CHAT_CREATE_PATH:
+            self.handle_text_chat_create()
+            return
+        text_chat_slot_request = resolve_text_chat_slot_request_path(parsed.path)
+        if text_chat_slot_request is not None:
+            slot_index, action = text_chat_slot_request
+            action = chat_requests.normalize_text_chat_slot_action(action)
+            if action == "activate":
+                self.handle_text_chat_activate(slot_index)
+                return
+            if action == "rename":
+                self.handle_text_chat_rename(slot_index)
+                return
+            if action == "clear":
+                self.handle_text_chat_clear(slot_index)
+                return
+            if action == "replace":
+                self.handle_text_chat_replace(slot_index)
+                return
+            if action == "profile":
+                self.handle_text_chat_profile(slot_index)
+                return
+            if action == "message":
+                self.handle_text_chat_message(slot_index)
+                return
         if parsed.path == TEXT_SERVICE_PROMPT_TEST_PATH:
             self.handle_text_service_prompt_test()
             return
+        if parsed.path == RESULT_EXPORT_PATH:
+            self.handle_result_export()
+            return
         if parsed.path == IDENTITY_TRANSFER_GENERATE_PATH:
             self.handle_identity_transfer_generate()
+            return
+        if parsed.path == IDENTITY_TRANSFER_MASK_HYBRID_GENERATE_PATH:
+            self.handle_identity_transfer_mask_hybrid_generate()
             return
         if parsed.path == IDENTITY_MULTI_REFERENCE_GENERATE_PATH:
             self.handle_identity_multi_reference_generate()
@@ -3040,282 +3047,175 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == IDENTITY_REFERENCE_GENERATE_PATH:
             self.handle_identity_reference_generate()
             return
+        if parsed.path == IDENTITY_RESEARCH_GENERATE_PATH:
+            self.handle_identity_research_generate()
+            return
         if parsed.path != "/generate":
             self.send_json(HTTPStatus.NOT_FOUND, {"status": "error", "reason": "not_found"})
             return
 
         request_id = self.server.next_request_id()
-        payload = self.read_json_body()
-        if payload is None:
+        prepared, prepare_error = general_generate_flow.prepare_general_generate_request(
+            self.read_json_body(),
+            normalize_negative_prompt=normalize_optional_negative_prompt,
+            parse_boolean_flag=lambda value: parse_boolean_flag(value, default=False),
+            normalize_denoise_strength_value=normalize_denoise_strength_value,
+            resolve_generation_request=resolve_generation_request,
+            resolve_requested_input_image=resolve_requested_input_image,
+            resolve_requested_mask_image=resolve_requested_mask_image,
+            resolve_inpainting_tuning=resolve_inpainting_tuning,
+        )
+        if prepare_error is not None or prepared is None:
             self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=None,
-                    error_type="invalid_request",
-                    blocker="invalid_json",
                     request_id=request_id,
-                ),
-            )
-            return
-
-        prompt = payload.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=None,
-                    error_type="invalid_request",
-                    blocker="empty_prompt",
-                    request_id=request_id,
-                ),
-            )
-            return
-
-        try:
-            use_input_image = parse_boolean_flag(payload.get("use_input_image"), default=False)
-        except ValueError as exc:
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=None,
-                    error_type="invalid_request",
-                    blocker=str(exc),
-                    request_id=request_id,
-                ),
-            )
-            return
-
-        try:
-            use_inpainting = parse_boolean_flag(payload.get("use_inpainting"), default=False)
-        except ValueError as exc:
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=None,
-                    error_type="invalid_request",
-                    blocker=str(exc),
-                    request_id=request_id,
-                ),
-            )
-            return
-
-        try:
-            denoise_strength = normalize_denoise_strength_value(payload.get("denoise_strength"))
-        except ValueError as exc:
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=None,
-                    error_type="invalid_request",
-                    blocker=str(exc),
-                    request_id=request_id,
-                ),
-            )
-            return
-
-        try:
-            mode, workflow, checkpoint = resolve_generation_request(
-                payload,
-                use_input_image=use_input_image,
-                use_inpainting=use_inpainting,
-            )
-        except ValueError as exc:
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=None,
-                    error_type="invalid_request",
-                    blocker=str(exc),
-                    request_id=request_id,
-                ),
-            )
-            return
-
-        input_image_path = None
-        if use_input_image or use_inpainting:
-            try:
-                _, input_image_path = resolve_requested_input_image(payload.get("input_image_id"))
-            except ValueError as exc:
-                self.send_json(
-                    HTTPStatus.BAD_REQUEST,
-                    build_error_response(
-                        mode=mode,
-                        error_type="invalid_request",
-                        blocker=str(exc),
-                        request_id=request_id,
-                    ),
+                    failure=prepare_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.BAD_REQUEST,
+                    fallback_error_type="invalid_request",
+                    fallback_blocker="invalid_json",
                 )
-                return
+            )
+            return
 
-        mask_image_path = None
-        if use_inpainting:
-            try:
-                _, mask_image_path = resolve_requested_mask_image(payload.get("mask_image_id"))
-            except ValueError as exc:
-                self.send_json(
-                    HTTPStatus.BAD_REQUEST,
-                    build_error_response(
-                        mode=mode,
-                        error_type="invalid_request",
-                        blocker=str(exc),
-                        request_id=request_id,
-                    ),
-                )
-                return
+        mode = str(prepared["mode"])
+        checkpoint = prepared["checkpoint"] if isinstance(prepared.get("checkpoint"), str) else None
+        use_input_image = prepared["use_input_image"] is True
+        use_inpainting = prepared["use_inpainting"] is True
+        use_edit_image = prepared["use_edit_image"] is True
+        denoise_strength = float(prepared["denoise_strength"])
+        input_image_path = prepared.get("input_image_path")
+        mask_image_path = prepared.get("mask_image_path")
+        negative_prompt = prepared.get("negative_prompt") if isinstance(prepared.get("negative_prompt"), str) else None
+        render_request = general_generate_flow.build_general_render_request(
+            prepared,
+            resolve_general_generate_tuning=resolve_general_generate_tuning,
+            resolve_render_prompt=resolve_render_prompt,
+            inpaint_locality_negative_suffix=INPAINT_LOCALITY_NEGATIVE_SUFFIX,
+        )
 
         system_state = self.server.collect_system_state()
-        if not system_state["comfyui_reachable"]:
-            blocker = "comfyui_unreachable"
-            if system_state.get("runner_error") == "runner_state_invalid":
-                blocker = "runner_state_invalid"
+        system_error = general_generate_flow.build_general_generate_system_failure(system_state)
+        if system_error is not None:
             self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=None,
-                    error_type="api_error",
-                    blocker=blocker,
                     request_id=request_id,
-                ),
+                    failure=system_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="comfyui_unreachable",
+                )
             )
             return
 
-        if system_state.get("runner_status") == "unknown":
-            self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
-                    mode=None,
-                    error_type="api_error",
-                    blocker="runner_state_invalid",
-                    request_id=request_id,
-                ),
-            )
+        busy_response = generate_endpoint_flow.try_begin_generate_render(
+            request_id=request_id,
+            try_begin_render=self.server.try_begin_render,
+            busy_response_builder=build_busy_response,
+        )
+        if busy_response is not None:
+            self.send_json(*busy_response)
             return
 
-        if not self.server.try_begin_render(request_id):
-            self.send_json(HTTPStatus.CONFLICT, build_busy_response(request_id=request_id))
-            return
-
-        response_payload: dict
-        response_status = HTTPStatus.OK
-        try:
-            result = run_render(
-                prompt=prompt.strip(),
+        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_render(
+                prompt=str(render_request["render_prompt"]),
                 mode=mode,
-                workflow=workflow,
+                workflow=str(prepared["workflow"]),
                 checkpoint=checkpoint,
+                negative_prompt=render_request["negative_prompt_value"] if isinstance(render_request.get("negative_prompt_value"), str) else None,
+                steps=int(render_request["steps_value"]),
+                cfg=float(render_request["cfg_value"]),
                 use_input_image=use_input_image,
                 input_image_path=input_image_path,
                 use_inpainting=use_inpainting,
                 mask_image_path=mask_image_path,
                 denoise_strength=denoise_strength,
+                grow_mask_by_override=render_request.get("grow_mask_by_override"),
                 wait=True,
+                wait_timeout=EDIT_WAIT_TIMEOUT_SECONDS if use_edit_image else 180,
                 output_dir=comfy_output_dir(),
                 logger=None,
                 error_logger=None,
-            )
-            response_status, response_payload = finalize_generate_result(
+            ),
+            finalize_callable=lambda result: finalize_generate_result(
                 result,
                 request_id,
-                prompt=prompt.strip(),
+                prompt=str(render_request["prompt_text"]),
                 checkpoint=checkpoint,
                 use_input_image=use_input_image,
                 use_inpainting=use_inpainting,
-            )
-        except Exception:
-            response_payload = build_error_response(
+                extra_metadata={
+                    "negative_prompt": negative_prompt,
+                },
+            ),
+            server_error_callable=lambda: (
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_error_response(
                 mode=mode,
                 error_type="api_error",
                 blocker="server_error",
                 request_id=request_id,
-            )
-            response_status = HTTPStatus.INTERNAL_SERVER_ERROR
-        finally:
-            self.server.finish_render()
+                ),
+            ),
+            finish_render=self.server.finish_render,
+        )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_reference_generate(self) -> None:
         request_id = self.server.next_request_id()
-        payload = self.read_json_body()
-        if payload is None:
+        prepared, prepare_error = identity_generate_flow.prepare_identity_reference_request(
+            self.read_json_body(),
+            resolve_reference_image=resolve_requested_reference_image,
+        )
+        if prepare_error is not None or prepared is None:
             self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_REFERENCE_MODE,
-                    error_type="invalid_request",
-                    blocker="invalid_json",
                     request_id=request_id,
-                ),
+                    failure=prepare_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.BAD_REQUEST,
+                    fallback_error_type="invalid_request",
+                    fallback_blocker="invalid_json",
+                )
             )
             return
-
-        prompt = payload.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=IDENTITY_REFERENCE_MODE,
-                    error_type="invalid_request",
-                    blocker="empty_prompt",
-                    request_id=request_id,
-                ),
-            )
-            return
-
-        checkpoint = None
-        if isinstance(payload.get("checkpoint"), str) and payload.get("checkpoint").strip():
-            checkpoint = payload.get("checkpoint").strip()
-
-        try:
-            _, reference_image_path = resolve_requested_reference_image(payload.get("reference_image_id"))
-        except ValueError as exc:
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=IDENTITY_REFERENCE_MODE,
-                    error_type="invalid_request",
-                    blocker=str(exc),
-                    request_id=request_id,
-                ),
-            )
-            return
+        prompt = prepared["prompt"]
+        checkpoint = prepared["checkpoint"]
+        reference_image_path = prepared["reference_image_path"]
 
         system_state = self.server.collect_system_state()
-        if not system_state["comfyui_reachable"]:
-            blocker = "comfyui_unreachable"
-            if system_state.get("runner_error") == "runner_state_invalid":
-                blocker = "runner_state_invalid"
+        system_error = identity_generate_flow.build_system_preflight_failure(system_state)
+        if system_error is not None:
             self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_REFERENCE_MODE,
-                    error_type="api_error",
-                    blocker=blocker,
                     request_id=request_id,
-                ),
+                    failure=system_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="comfyui_unreachable",
+                )
             )
             return
 
-        if system_state.get("runner_status") == "unknown":
-            self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
-                    mode=IDENTITY_REFERENCE_MODE,
-                    error_type="api_error",
-                    blocker="runner_state_invalid",
-                    request_id=request_id,
-                ),
-            )
+        busy_response = generate_endpoint_flow.try_begin_generate_render(
+            request_id=request_id,
+            try_begin_render=self.server.try_begin_render,
+            busy_response_builder=build_busy_response,
+        )
+        if busy_response is not None:
+            self.send_json(*busy_response)
             return
 
-        if not self.server.try_begin_render(request_id):
-            self.send_json(HTTPStatus.CONFLICT, build_busy_response(request_id=request_id))
-            return
-
-        response_payload: dict
-        response_status = HTTPStatus.OK
-        try:
-            result = run_identity_reference(
+        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_reference(
                 prompt=prompt.strip(),
                 reference_image_path=reference_image_path,
                 checkpoint=checkpoint,
@@ -3323,308 +3223,949 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 output_dir=comfy_output_dir(),
                 logger=None,
                 error_logger=None,
-            )
-            if result.get("status") == "ok":
-                response_status, response_payload = finalize_generate_result(
-                    result,
-                    request_id,
-                    prompt=prompt.strip(),
-                    checkpoint=str(result.get("checkpoint") or checkpoint or ""),
-                    use_input_image=False,
-                    use_inpainting=False,
-                )
-            else:
-                response_status = resolve_identity_reference_status_code(
-                    error_type=str(result.get("error_type") or ""),
-                    blocker=str(result.get("blocker") or ""),
-                )
-                response_payload = build_error_response(
-                    mode=IDENTITY_REFERENCE_MODE,
-                    error_type=str(result.get("error_type") or "api_error"),
-                    blocker=str(result.get("blocker") or "identity_reference_failed"),
-                    prompt_id=result.get("prompt_id") if isinstance(result.get("prompt_id"), str) else None,
-                    request_id=request_id,
-                )
-        except Exception:
-            response_payload = build_error_response(
-                mode=IDENTITY_REFERENCE_MODE,
-                error_type="api_error",
-                blocker="server_error",
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
                 request_id=request_id,
+                mode=IDENTITY_REFERENCE_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_reference_failed",
+                status_code_resolver=resolve_identity_reference_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_REFERENCE_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
+        )
+
+        self.send_json(response_status, response_payload)
+
+    def handle_identity_research_generate(self) -> None:
+        request_id = self.server.next_request_id()
+        prepared, prepare_error = identity_generate_flow.prepare_identity_research_request(
+            self.read_json_body(),
+            resolve_reference_image=resolve_requested_reference_image,
+            normalize_negative_prompt=normalize_optional_negative_prompt,
+            default_provider=IDENTITY_RESEARCH_DEFAULT_PROVIDER,
+        )
+        if prepare_error is not None or prepared is None:
+            self.send_json(
+                *generate_endpoint_flow.build_generate_endpoint_error(
+                    mode=IDENTITY_RESEARCH_MODE,
+                    request_id=request_id,
+                    failure=prepare_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.BAD_REQUEST,
+                    fallback_error_type="invalid_request",
+                    fallback_blocker="invalid_json",
+                )
             )
-            response_status = HTTPStatus.INTERNAL_SERVER_ERROR
-        finally:
-            self.server.finish_render()
+            return
+        prompt = prepared["prompt"]
+        negative_prompt = prepared["negative_prompt"]
+        provider = prepared["provider"]
+        checkpoint = prepared["checkpoint"]
+        reference_image_payload = prepared["reference_image_payload"]
+        reference_image_path = prepared["reference_image_path"]
+
+        runtime_state = build_identity_research_runtime_state(provider=provider)
+        runtime_error = identity_generate_flow.build_runtime_preflight_failure(
+            runtime_state,
+            unavailable_blocker="identity_research_unavailable",
+            status_code_resolver=resolve_identity_reference_status_code,
+        )
+        if runtime_error is not None:
+            self.send_json(
+                *generate_endpoint_flow.build_generate_endpoint_error(
+                    mode=IDENTITY_RESEARCH_MODE,
+                    request_id=request_id,
+                    failure=runtime_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="identity_research_unavailable",
+                )
+            )
+            return
+
+        system_state = self.server.collect_system_state()
+        system_error = identity_generate_flow.build_system_preflight_failure(system_state)
+        if system_error is not None:
+            self.send_json(
+                *generate_endpoint_flow.build_generate_endpoint_error(
+                    mode=IDENTITY_RESEARCH_MODE,
+                    request_id=request_id,
+                    failure=system_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="comfyui_unreachable",
+                )
+            )
+            return
+
+        busy_response = generate_endpoint_flow.try_begin_generate_render(
+            request_id=request_id,
+            try_begin_render=self.server.try_begin_render,
+            busy_response_builder=build_busy_response,
+        )
+        if busy_response is not None:
+            self.send_json(*busy_response)
+            return
+
+        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_research(
+                prompt=prompt.strip(),
+                negative_prompt=negative_prompt or "",
+                reference_image_path=reference_image_path,
+                provider=provider,
+                checkpoint=checkpoint,
+                wait=True,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
+                request_id=request_id,
+                mode=IDENTITY_RESEARCH_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_research_failed",
+                status_code_resolver=resolve_identity_reference_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "negative_prompt": negative_prompt,
+                    "provider": provider,
+                    "identity_research_provider": provider,
+                    "identity_research_workflow": str(result.get("workflow_name") or "").strip() or None,
+                    "identity_research_reference_image_id": str(reference_image_payload.get("image_id") or "").strip() or None,
+                    "identity_research_reference_file_name": (
+                        str(reference_image_payload.get("stored_name") or "").strip()
+                        or str(reference_image_payload.get("original_name") or "").strip()
+                        or None
+                    ),
+                    "reference_count": 1,
+                    "reference_image_ids": [reference_image_payload["image_id"]] if isinstance(reference_image_payload.get("image_id"), str) and reference_image_payload.get("image_id") else [],
+                    "store_scope": "app_results",
+                    "cleanup_policy": "retention_limit",
+                    "experimental": True,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_RESEARCH_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
+        )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_transfer_generate(self) -> None:
         request_id = self.server.next_request_id()
-        payload = self.read_json_body()
-        if payload is None:
+        prepared, prepare_error = identity_generate_flow.prepare_identity_reference_request(
+            self.read_json_body(),
+            resolve_reference_image=lambda value: ({}, None),
+        )
+        if prepare_error is not None or prepared is None:
             self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_TRANSFER_MODE,
-                    error_type="invalid_request",
-                    blocker="invalid_json",
                     request_id=request_id,
-                ),
+                    failure=prepare_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.BAD_REQUEST,
+                    fallback_error_type="invalid_request",
+                    fallback_blocker="invalid_json",
+                )
             )
             return
-
-        prompt = payload.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
-                    mode=IDENTITY_TRANSFER_MODE,
-                    error_type="invalid_request",
-                    blocker="empty_prompt",
-                    request_id=request_id,
-                ),
-            )
-            return
-
-        checkpoint = None
-        if isinstance(payload.get("checkpoint"), str) and payload.get("checkpoint").strip():
-            checkpoint = payload.get("checkpoint").strip()
+        prompt = prepared["prompt"]
+        checkpoint = prepared["checkpoint"]
 
         runtime_state = build_identity_transfer_runtime_state()
-        if runtime_state.get("ok") is not True:
-            blocker = str(runtime_state.get("blocker") or "identity_transfer_unavailable")
-            error_type = str(runtime_state.get("error_type") or "api_error")
+        runtime_error = identity_generate_flow.build_runtime_preflight_failure(
+            runtime_state,
+            unavailable_blocker="identity_transfer_unavailable",
+            status_code_resolver=resolve_identity_transfer_generate_status_code,
+        )
+        if runtime_error is not None:
             self.send_json(
-                resolve_identity_transfer_generate_status_code(error_type=error_type, blocker=blocker),
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_TRANSFER_MODE,
-                    error_type=error_type,
-                    blocker=blocker,
                     request_id=request_id,
-                ),
+                    failure=runtime_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="identity_transfer_unavailable",
+                )
             )
             return
 
         system_state = self.server.collect_system_state()
-        if not system_state["comfyui_reachable"]:
-            blocker = "comfyui_unreachable"
-            if system_state.get("runner_error") == "runner_state_invalid":
-                blocker = "runner_state_invalid"
+        system_error = identity_generate_flow.build_system_preflight_failure(system_state)
+        if system_error is not None:
             self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_TRANSFER_MODE,
-                    error_type="api_error",
-                    blocker=blocker,
                     request_id=request_id,
-                ),
+                    failure=system_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="comfyui_unreachable",
+                )
             )
             return
 
-        if system_state.get("runner_status") == "unknown":
-            self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
-                    mode=IDENTITY_TRANSFER_MODE,
-                    error_type="api_error",
-                    blocker="runner_state_invalid",
-                    request_id=request_id,
-                ),
-            )
+        busy_response = generate_endpoint_flow.try_begin_generate_render(
+            request_id=request_id,
+            try_begin_render=self.server.try_begin_render,
+            busy_response_builder=build_busy_response,
+        )
+        if busy_response is not None:
+            self.send_json(*busy_response)
             return
 
-        if not self.server.try_begin_render(request_id):
-            self.send_json(HTTPStatus.CONFLICT, build_busy_response(request_id=request_id))
-            return
-
-        response_payload: dict
-        response_status = HTTPStatus.OK
-        try:
-            result = run_identity_transfer(
+        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_transfer(
                 prompt=prompt.strip(),
                 checkpoint=checkpoint,
                 wait=True,
                 output_dir=comfy_output_dir(),
                 logger=None,
                 error_logger=None,
-            )
-            if result.get("status") == "ok":
-                response_status, response_payload = finalize_generate_result(
-                    result,
-                    request_id,
-                    prompt=prompt.strip(),
-                    checkpoint=str(result.get("checkpoint") or checkpoint or ""),
-                    use_input_image=False,
-                    use_inpainting=False,
-                    extra_metadata={
-                        "used_roles": result.get("used_roles") if isinstance(result.get("used_roles"), list) else [],
-                        "pose_reference_present": bool(result.get("pose_reference_present")),
-                        "pose_reference_used": bool(result.get("pose_reference_used")),
-                        "transfer_mask_present": bool(result.get("transfer_mask_present")),
-                        "transfer_mask_used": bool(result.get("transfer_mask_used")),
-                        "identity_head_reference_image_id": str(result.get("identity_head_reference_image_id") or "").strip() or None,
-                        "target_body_image_id": str(result.get("target_body_image_id") or "").strip() or None,
-                        "pose_reference_image_id": str(result.get("pose_reference_image_id") or "").strip() or None,
-                        "transfer_mask_image_id": str(result.get("transfer_mask_image_id") or "").strip() or None,
-                        "identity_transfer_strategy": str(result.get("identity_transfer_strategy") or "").strip() or None,
-                    },
-                )
-            else:
-                response_status = resolve_identity_transfer_generate_status_code(
-                    error_type=str(result.get("error_type") or ""),
-                    blocker=str(result.get("blocker") or ""),
-                )
-                response_payload = build_error_response(
-                    mode=IDENTITY_TRANSFER_MODE,
-                    error_type=str(result.get("error_type") or "api_error"),
-                    blocker=str(result.get("blocker") or "identity_transfer_failed"),
-                    prompt_id=result.get("prompt_id") if isinstance(result.get("prompt_id"), str) else None,
-                    request_id=request_id,
-                )
-        except Exception:
-            response_payload = build_error_response(
-                mode=IDENTITY_TRANSFER_MODE,
-                error_type="api_error",
-                blocker="server_error",
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
                 request_id=request_id,
+                mode=IDENTITY_TRANSFER_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_transfer_failed",
+                status_code_resolver=resolve_identity_transfer_generate_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "used_roles": result.get("used_roles") if isinstance(result.get("used_roles"), list) else [],
+                    "pose_reference_present": bool(result.get("pose_reference_present")),
+                    "pose_reference_used": bool(result.get("pose_reference_used")),
+                    "transfer_mask_present": bool(result.get("transfer_mask_present")),
+                    "transfer_mask_used": bool(result.get("transfer_mask_used")),
+                    "identity_head_reference_image_id": str(result.get("identity_head_reference_image_id") or "").strip() or None,
+                    "target_body_image_id": str(result.get("target_body_image_id") or "").strip() or None,
+                    "pose_reference_image_id": str(result.get("pose_reference_image_id") or "").strip() or None,
+                    "transfer_mask_image_id": str(result.get("transfer_mask_image_id") or "").strip() or None,
+                    "identity_transfer_strategy": str(result.get("identity_transfer_strategy") or "").strip() or None,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_TRANSFER_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
+        )
+
+        self.send_json(response_status, response_payload)
+
+    def handle_identity_transfer_mask_hybrid_generate(self) -> None:
+        request_id = self.server.next_request_id()
+        prepared, prepare_error = identity_generate_flow.prepare_identity_reference_request(
+            self.read_json_body(),
+            resolve_reference_image=lambda value: ({}, None),
+        )
+        if prepare_error is not None or prepared is None:
+            self.send_json(
+                *generate_endpoint_flow.build_generate_endpoint_error(
+                    mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                    request_id=request_id,
+                    failure=prepare_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.BAD_REQUEST,
+                    fallback_error_type="invalid_request",
+                    fallback_blocker="invalid_json",
+                )
             )
-            response_status = HTTPStatus.INTERNAL_SERVER_ERROR
-        finally:
-            self.server.finish_render()
+            return
+        prompt = prepared["prompt"]
+        checkpoint = prepared["checkpoint"]
+
+        runtime_state = build_identity_transfer_mask_hybrid_runtime_state()
+        runtime_error = identity_generate_flow.build_runtime_preflight_failure(
+            runtime_state,
+            unavailable_blocker="identity_transfer_unavailable",
+            status_code_resolver=resolve_identity_transfer_generate_status_code,
+        )
+        if runtime_error is not None:
+            self.send_json(
+                *generate_endpoint_flow.build_generate_endpoint_error(
+                    mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                    request_id=request_id,
+                    failure=runtime_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="identity_transfer_unavailable",
+                )
+            )
+            return
+
+        system_state = self.server.collect_system_state()
+        system_error = identity_generate_flow.build_system_preflight_failure(system_state)
+        if system_error is not None:
+            self.send_json(
+                *generate_endpoint_flow.build_generate_endpoint_error(
+                    mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                    request_id=request_id,
+                    failure=system_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="comfyui_unreachable",
+                )
+            )
+            return
+
+        busy_response = generate_endpoint_flow.try_begin_generate_render(
+            request_id=request_id,
+            try_begin_render=self.server.try_begin_render,
+            busy_response_builder=build_busy_response,
+        )
+        if busy_response is not None:
+            self.send_json(*busy_response)
+            return
+
+        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_transfer_mask_hybrid(
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                wait=True,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
+                request_id=request_id,
+                mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_transfer_failed",
+                status_code_resolver=resolve_identity_transfer_generate_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "used_roles": result.get("used_roles") if isinstance(result.get("used_roles"), list) else [],
+                    "pose_reference_present": bool(result.get("pose_reference_present")),
+                    "pose_reference_used": bool(result.get("pose_reference_used")),
+                    "transfer_mask_present": bool(result.get("transfer_mask_present")),
+                    "transfer_mask_used": bool(result.get("transfer_mask_used")),
+                    "identity_head_reference_image_id": str(result.get("identity_head_reference_image_id") or "").strip() or None,
+                    "target_body_image_id": str(result.get("target_body_image_id") or "").strip() or None,
+                    "pose_reference_image_id": str(result.get("pose_reference_image_id") or "").strip() or None,
+                    "transfer_mask_image_id": str(result.get("transfer_mask_image_id") or "").strip() or None,
+                    "identity_transfer_strategy": str(result.get("identity_transfer_strategy") or "").strip() or None,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
+        )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_multi_reference_generate(self) -> None:
         request_id = self.server.next_request_id()
-        payload = self.read_json_body()
-        if payload is None:
+        payload_dict, payload_error = identity_generate_flow.coerce_identity_generate_payload(self.read_json_body())
+        if payload_error is not None or payload_dict is None:
             self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    error_type="invalid_request",
-                    blocker="invalid_json",
                     request_id=request_id,
-                ),
+                    failure=payload_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.BAD_REQUEST,
+                    fallback_error_type="invalid_request",
+                    fallback_blocker="invalid_json",
+                )
             )
             return
-
-        prompt = payload.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
+        prepared, prepare_error = identity_generate_flow.normalize_identity_prompt_and_checkpoint(payload_dict)
+        if prepare_error is not None or prepared is None:
             self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    error_type="invalid_request",
-                    blocker="empty_prompt",
                     request_id=request_id,
-                ),
+                    failure=prepare_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.BAD_REQUEST,
+                    fallback_error_type="invalid_request",
+                    fallback_blocker="empty_prompt",
+                )
             )
             return
-
-        checkpoint = None
-        if isinstance(payload.get("checkpoint"), str) and payload.get("checkpoint").strip():
-            checkpoint = payload.get("checkpoint").strip()
+        prompt = prepared["prompt"]
+        checkpoint = prepared["checkpoint"]
 
         adapter_state = build_multi_reference_adapter_state()
         runtime_state = build_identity_multi_reference_runtime_state(adapter_state=adapter_state)
-        if runtime_state.get("ok") is not True:
-            blocker = str(runtime_state.get("blocker") or "identity_multi_reference_unavailable")
-            error_type = str(runtime_state.get("error_type") or "api_error")
+        runtime_error = identity_generate_flow.build_runtime_preflight_failure(
+            runtime_state,
+            unavailable_blocker="identity_multi_reference_unavailable",
+            status_code_resolver=resolve_identity_multi_reference_status_code,
+        )
+        if runtime_error is not None:
             self.send_json(
-                resolve_identity_multi_reference_status_code(error_type=error_type, blocker=blocker),
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    error_type=error_type,
-                    blocker=blocker,
                     request_id=request_id,
-                ),
+                    failure=runtime_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="identity_multi_reference_unavailable",
+                )
             )
             return
 
         system_state = self.server.collect_system_state()
-        if not system_state["comfyui_reachable"]:
-            blocker = "comfyui_unreachable"
-            if system_state.get("runner_error") == "runner_state_invalid":
-                blocker = "runner_state_invalid"
+        system_error = identity_generate_flow.build_system_preflight_failure(system_state)
+        if system_error is not None:
             self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
+                *generate_endpoint_flow.build_generate_endpoint_error(
                     mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    error_type="api_error",
-                    blocker=blocker,
                     request_id=request_id,
-                ),
+                    failure=system_error,
+                    error_response_builder=build_error_response,
+                    fallback_http_status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    fallback_error_type="api_error",
+                    fallback_blocker="comfyui_unreachable",
+                )
             )
             return
 
-        if system_state.get("runner_status") == "unknown":
-            self.send_json(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                build_error_response(
-                    mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    error_type="api_error",
-                    blocker="runner_state_invalid",
-                    request_id=request_id,
-                ),
-            )
+        busy_response = generate_endpoint_flow.try_begin_generate_render(
+            request_id=request_id,
+            try_begin_render=self.server.try_begin_render,
+            busy_response_builder=build_busy_response,
+        )
+        if busy_response is not None:
+            self.send_json(*busy_response)
             return
 
-        if not self.server.try_begin_render(request_id):
-            self.send_json(HTTPStatus.CONFLICT, build_busy_response(request_id=request_id))
-            return
-
-        response_payload: dict
-        response_status = HTTPStatus.OK
-        try:
-            result = run_identity_multi_reference(
+        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_multi_reference(
                 prompt=prompt.strip(),
-                adapter_state=runtime_state.get("adapter_state") if isinstance(runtime_state.get("adapter_state"), dict) else adapter_state,
+                adapter_state=identity_generate_flow.resolve_multi_reference_adapter_state(
+                    runtime_state,
+                    fallback_adapter_state=adapter_state,
+                ),
                 checkpoint=checkpoint,
                 wait=True,
                 output_dir=comfy_output_dir(),
                 logger=None,
                 error_logger=None,
-            )
-            if result.get("status") == "ok":
-                response_status, response_payload = finalize_generate_result(
-                    result,
-                    request_id,
-                    prompt=prompt.strip(),
-                    checkpoint=str(result.get("checkpoint") or checkpoint or ""),
-                    use_input_image=False,
-                    use_inpainting=False,
-                    extra_metadata={
-                        "reference_count": int(result.get("reference_count") or 0),
-                        "reference_slots": result.get("reference_slots") if isinstance(result.get("reference_slots"), list) else [],
-                        "reference_image_ids": result.get("reference_image_ids") if isinstance(result.get("reference_image_ids"), list) else [],
-                        "multi_reference_strategy": str(result.get("multi_reference_strategy") or "").strip() or None,
-                    },
-                )
-            else:
-                response_status = resolve_identity_multi_reference_status_code(
-                    error_type=str(result.get("error_type") or ""),
-                    blocker=str(result.get("blocker") or ""),
-                )
-                response_payload = build_error_response(
-                    mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    error_type=str(result.get("error_type") or "api_error"),
-                    blocker=str(result.get("blocker") or "identity_multi_reference_failed"),
-                    prompt_id=result.get("prompt_id") if isinstance(result.get("prompt_id"), str) else None,
-                    request_id=request_id,
-                )
-        except Exception:
-            response_payload = build_error_response(
-                mode=IDENTITY_MULTI_REFERENCE_MODE,
-                error_type="api_error",
-                blocker="server_error",
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
                 request_id=request_id,
-            )
-            response_status = HTTPStatus.INTERNAL_SERVER_ERROR
-        finally:
-            self.server.finish_render()
+                mode=IDENTITY_MULTI_REFERENCE_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_multi_reference_failed",
+                status_code_resolver=resolve_identity_multi_reference_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "reference_count": int(result.get("reference_count") or 0),
+                    "reference_slots": result.get("reference_slots") if isinstance(result.get("reference_slots"), list) else [],
+                    "reference_image_ids": result.get("reference_image_ids") if isinstance(result.get("reference_image_ids"), list) else [],
+                    "multi_reference_strategy": str(result.get("multi_reference_strategy") or "").strip() or None,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_MULTI_REFERENCE_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
+        )
 
         self.send_json(response_status, response_payload)
+
+    def handle_text_chat_slots(self) -> None:
+        try:
+            payload = build_text_chat_overview_payload()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload)
+
+    def handle_text_chat_slot_detail(self, slot_index: int) -> None:
+        try:
+            slot = get_text_chat_slot(slot_index)
+            profile_state = build_text_model_profiles_state()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(
+            HTTPStatus.OK,
+            chat_responses.build_text_chat_slot_detail_response(
+                slot=slot,
+                profile_state=profile_state,
+            ),
+        )
+
+    def handle_text_chat_create(self) -> None:
+        payload, payload_error = chat_requests.coerce_optional_text_chat_payload(self.read_json_body())
+        if payload_error is not None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=payload_error,
+                    message="Chat request payload is invalid.",
+                ),
+            )
+            return
+        title, title_error = chat_requests.normalize_create_text_chat_title(
+            payload.get("title"),
+            title_normalizer=normalize_text_chat_title,
+        )
+        if title_error == "invalid_text_chat_title":
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=title_error,
+                    message="Chat title must be a string.",
+                ),
+            )
+            return
+        if title_error == "empty_text_chat_title":
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=title_error,
+                    message="Chat title must not be empty.",
+                ),
+            )
+            return
+        try:
+            created = create_text_chat_in_first_empty_slot(title=title)
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        if created is None:
+            self.send_json(
+                HTTPStatus.CONFLICT,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker="text_chat_slots_full",
+                    message="All five text chat slots are already occupied.",
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, build_text_chat_overview_payload())
+
+    def handle_text_chat_activate(self, slot_index: int) -> None:
+        try:
+            set_active_text_chat_slot_index(slot_index)
+            slot = get_text_chat_slot(slot_index)
+            switch_notice = None
+            if slot["occupied"] is True:
+                profile_id = slot.get("model_profile") if isinstance(slot.get("model_profile"), str) else resolve_default_text_model_profile_id()
+                switch_result = ensure_text_model_profile_active(profile_id)
+                if switch_result.get("ok") is not True:
+                    switch_notice = {
+                        "blocker": switch_result.get("blocker"),
+                        "message": switch_result.get("message"),
+                    }
+            payload = build_text_chat_overview_payload()
+            if switch_notice is not None:
+                payload["model_switch_notice"] = switch_notice
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload)
+
+    def handle_text_chat_rename(self, slot_index: int) -> None:
+        payload, payload_error = chat_requests.coerce_required_text_chat_payload(self.read_json_body())
+        if payload_error is not None or payload is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=payload_error or "invalid_json",
+                    message="Rename request payload is invalid.",
+                ),
+            )
+            return
+        title, title_error = chat_requests.normalize_required_text_chat_title(
+            payload.get("title"),
+            title_normalizer=normalize_text_chat_title,
+        )
+        if title_error is not None or title is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=title_error or "invalid_text_chat_title",
+                    message="A non-empty chat title is required.",
+                ),
+            )
+            return
+        try:
+            current_slot = get_text_chat_slot(slot_index)
+            if current_slot["occupied"] is not True:
+                self.send_json(
+                    HTTPStatus.CONFLICT,
+                    build_text_chat_error_response(
+                        error_type="invalid_request",
+                        blocker="text_chat_slot_empty",
+                        message="The selected chat slot is empty.",
+                    ),
+                )
+                return
+            update_text_chat_slot_metadata(slot_index, title=title, updated_at=utc_now_iso())
+            result_payload = build_text_chat_overview_payload()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, result_payload)
+
+    def handle_text_chat_clear(self, slot_index: int) -> None:
+        try:
+            clear_text_chat_slot(slot_index)
+            if get_active_text_chat_slot_index() == slot_index:
+                set_active_text_chat_slot_index(slot_index)
+            payload = build_text_chat_overview_payload()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload)
+
+    def handle_text_chat_replace(self, slot_index: int) -> None:
+        payload, payload_error = chat_requests.coerce_optional_text_chat_payload(self.read_json_body())
+        if payload_error is not None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=payload_error,
+                    message="Replace request payload is invalid.",
+                ),
+            )
+            return
+        title, title_error = chat_requests.normalize_optional_text_chat_title(
+            payload.get("title"),
+            title_normalizer=normalize_text_chat_title,
+        )
+        if title_error == "invalid_text_chat_title":
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=title_error,
+                    message="Chat title must be a string.",
+                ),
+            )
+            return
+        try:
+            create_text_chat_in_slot(slot_index, title=title)
+            payload_out = build_text_chat_overview_payload()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload_out)
+
+    def handle_text_chat_profile(self, slot_index: int) -> None:
+        payload, payload_error = chat_requests.coerce_required_text_chat_payload(self.read_json_body())
+        if payload_error is not None or payload is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=payload_error or "invalid_json",
+                    message="Profile request payload is invalid.",
+                ),
+            )
+            return
+
+        profile_id, profile_error = normalize_text_model_profile(payload.get("model_profile"))
+        if profile_error is not None or profile_id is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=profile_error or "invalid_model_profile",
+                    message="Text model profile must be standard, strong_writing or multilingual.",
+                ),
+            )
+            return
+
+        try:
+            slot = get_text_chat_slot(slot_index)
+            if slot["occupied"] is not True:
+                self.send_json(
+                    HTTPStatus.CONFLICT,
+                    build_text_chat_error_response(
+                        error_type="invalid_request",
+                        blocker="text_chat_slot_empty",
+                        message="Der gewaehlte Chat-Slot ist leer.",
+                    ),
+                )
+                return
+            switch_notice = None
+            update_text_chat_slot_metadata(
+                slot_index,
+                model_profile=profile_id,
+                model=slot.get("model"),
+                updated_at=utc_now_iso(),
+            )
+            if get_active_text_chat_slot_index() == slot_index:
+                switch_result = ensure_text_model_profile_active(profile_id)
+                refreshed_profile = switch_result.get("profile") if isinstance(switch_result.get("profile"), dict) else get_text_model_profile(profile_id)
+                update_text_chat_slot_metadata(
+                    slot_index,
+                    model=refreshed_profile.get("actual_model_name") or resolve_text_chat_model_label() or slot.get("model"),
+                    updated_at=utc_now_iso(),
+                )
+                if switch_result.get("ok") is not True:
+                    switch_notice = {
+                        "blocker": switch_result.get("blocker"),
+                        "message": switch_result.get("message"),
+                    }
+            payload_out = build_text_chat_overview_payload()
+            if switch_notice is not None:
+                payload_out["model_switch_notice"] = switch_notice
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload_out)
+
+    def handle_text_chat_message(self, slot_index: int) -> None:
+        payload, payload_error = chat_requests.coerce_required_text_chat_payload(self.read_json_body())
+        if payload_error is not None or payload is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=payload_error or "invalid_json",
+                    message="Message request payload is invalid.",
+                ),
+            )
+            return
+
+        prompt, prompt_error = normalize_text_service_prompt(payload.get("prompt"))
+        if prompt_error is not None or prompt is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=prompt_error or "empty_prompt",
+                    message="A valid prompt is required.",
+                ),
+            )
+            return
+
+        mode, mode_error = normalize_text_work_mode(payload.get("mode"))
+        if mode_error is not None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=mode_error,
+                    message="Text mode must be writing, rewrite or image_prompt.",
+                ),
+            )
+            return
+
+        title, title_error = chat_requests.normalize_optional_text_chat_title(
+            payload.get("title"),
+            title_normalizer=normalize_text_chat_title,
+        )
+        if title_error == "invalid_text_chat_title":
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_chat_error_response(
+                    error_type="invalid_request",
+                    blocker=title_error,
+                    message="Chat title must be a string.",
+                ),
+            )
+            return
+        try:
+            slot = get_text_chat_slot(slot_index)
+            if slot["occupied"] is not True:
+                slot = create_text_chat_in_slot(slot_index, title=title)
+            else:
+                set_active_text_chat_slot_index(slot_index)
+
+            prepared_request = chat_text_service.prepare_text_chat_service_request(
+                slot=slot,
+                prompt=prompt,
+                requested_title=title,
+                default_title=build_default_text_chat_title(slot_index),
+                default_profile_id=resolve_default_text_model_profile_id(),
+                recent_messages_limit=TEXT_CHAT_CONTEXT_RECENT_MESSAGES,
+                infer_language=infer_text_chat_language_from_text,
+                compose_prompt=build_text_chat_prompt,
+            )
+            current_title = prepared_request["current_title"]
+            inferred_language = prepared_request["inferred_language"]
+            profile_id = prepared_request["profile_id"]
+            switch_result = ensure_text_model_profile_active(profile_id)
+            profile = switch_result.get("profile") if isinstance(switch_result.get("profile"), dict) else get_text_model_profile(profile_id)
+            if switch_result.get("ok") is not True:
+                self.send_json(
+                    HTTPStatus.CONFLICT,
+                    build_text_chat_error_response(
+                        error_type="invalid_request",
+                        blocker=str(switch_result.get("blocker") or "text_model_profile_unavailable"),
+                        message=str(switch_result.get("message") or "Das fuer diesen Chat gespeicherte Modellprofil ist aktuell nicht lauffaehig."),
+                    ),
+                )
+                return
+            current_model = profile.get("actual_model_name") or resolve_text_chat_model_label()
+            service_result = chat_text_service.execute_text_chat_service_request(
+                request_callable=request_text_service_prompt,
+                retry_predicate=should_retry_text_service_prompt_after_switch,
+                sleep_callable=time.sleep,
+                switch_result=switch_result,
+                composed_prompt=prepared_request["composed_prompt"],
+                mode=mode,
+                summary=prepared_request["summary"],
+                recent_messages=prepared_request["recent_messages"],
+            )
+            normalized_service_result = chat_text_service.normalize_text_chat_service_result(
+                response_payload=service_result["response_payload"],
+                response_error=service_result["response_error"],
+                response_status=service_result["response_status"],
+                service_name=service_result["service_name"],
+                model_status=service_result["model_status"],
+            )
+            if normalized_service_result["ok"] is not True:
+                self.send_json(
+                    normalized_service_result["http_status"],
+                    build_text_chat_error_response(
+                        error_type="api_error",
+                        blocker=str(normalized_service_result["blocker"]),
+                        message=str(normalized_service_result["message"]),
+                    ),
+                )
+                return
+
+            normalized_response_text = str(normalized_service_result["response_text"])
+            append_text_chat_message(slot_index, role="user", content=prompt)
+            append_text_chat_message(slot_index, role="assistant", content=normalized_response_text)
+            updated_slot = get_text_chat_slot(slot_index)
+            post_response_state = chat_text_service.build_text_chat_post_response_state(
+                updated_slot=updated_slot,
+                slot_index=slot_index,
+                current_title=current_title,
+                prompt=prompt,
+                default_title=build_default_text_chat_title(slot_index),
+                excerpt_text=excerpt_text,
+                build_summary=build_text_chat_summary,
+            )
+            update_text_chat_slot_metadata(
+                slot_index,
+                title=post_response_state["current_title"],
+                summary=post_response_state["updated_summary"] or "",
+                language=inferred_language,
+                model_profile=profile_id,
+                model=(
+                    current_model
+                    or normalized_service_result.get("service_name")
+                    or normalized_service_result.get("model_status")
+                ),
+                updated_at=utc_now_iso(),
+            )
+            payload_out = build_text_chat_overview_payload()
+            payload_out["last_response_text"] = normalized_response_text
+            payload_out["active_mode"] = mode or TEXT_WORK_MODE_WRITING
+            payload_out["active_model_profile"] = profile_id
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_text_chat_error_response(
+                    error_type="api_error",
+                    blocker="text_chat_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload_out)
 
     def handle_text_service_prompt_test(self) -> None:
         payload = self.read_json_body()
@@ -3669,6 +4210,63 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        mode, mode_error = normalize_text_work_mode(payload.get("mode"))
+        if mode_error is not None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_service_prompt_test_response(
+                    ok=False,
+                    text_service_reachable=False,
+                    stub=True,
+                    response_text=None,
+                    error=mode_error,
+                    error_message="mode must be writing, rewrite or image_prompt.",
+                    service_name=None,
+                    model_status=None,
+                ),
+            )
+            return
+
+        profile_id, profile_error = normalize_text_model_profile(payload.get("model_profile"))
+        if profile_error is not None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_text_service_prompt_test_response(
+                    ok=False,
+                    text_service_reachable=False,
+                    stub=True,
+                    response_text=None,
+                    error=profile_error,
+                    error_message="model_profile must be standard, strong_writing or multilingual.",
+                    service_name=None,
+                    model_status=None,
+                ),
+            )
+            return
+
+        selected_profile_id = profile_id or resolve_default_text_model_profile_id()
+        switch_result = ensure_text_model_profile_active(selected_profile_id)
+        selected_profile = switch_result.get("profile") if isinstance(switch_result.get("profile"), dict) else get_text_model_profile(selected_profile_id)
+        if switch_result.get("ok") is not True:
+            self.send_json(
+                HTTPStatus.CONFLICT,
+                {
+                    **build_text_service_prompt_test_response(
+                        ok=False,
+                        text_service_reachable=True,
+                        stub=False,
+                        response_text=None,
+                        error=str(switch_result.get("blocker") or "text_model_profile_unavailable"),
+                        error_message=str(switch_result.get("message") or "Dieses Modellprofil ist aktuell nicht lauffaehig."),
+                        service_name=None,
+                        model_status=None,
+                    ),
+                    "model_profile": selected_profile_id,
+                    "model_profile_label": selected_profile.get("label"),
+                },
+            )
+            return
+
         configured, config, config_error = load_text_service_config_state()
         if not configured or config is None:
             self.send_json(
@@ -3695,8 +4293,19 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         response_payload, response_error, response_status = post_json_detail(
             f"http://{config['host']}:{config['port']}/prompt",
             timeout=TEXT_SERVICE_PROMPT_TIMEOUT,
-            payload={"prompt": prompt},
+            payload={"prompt": prompt, "mode": mode},
         )
+        if should_retry_text_service_prompt_after_switch(
+            switch_result=switch_result,
+            response_error=response_error,
+            response_status=response_status,
+        ):
+            time.sleep(5.0)
+            response_payload, response_error, response_status = post_json_detail(
+                f"http://{config['host']}:{config['port']}/prompt",
+                timeout=TEXT_SERVICE_PROMPT_TIMEOUT,
+                payload={"prompt": prompt, "mode": mode},
+            )
 
         if response_error is not None or response_status is None:
             blocker = "text_service_unreachable" if response_error in {"unreachable", "timeout"} else "text_service_invalid_response"
@@ -3722,16 +4331,20 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if response_status == HTTPStatus.OK and response_payload.get("ok") is True:
             self.send_json(
                 HTTPStatus.OK,
-                build_text_service_prompt_test_response(
-                    ok=True,
-                    text_service_reachable=True,
-                    stub=upstream_stub,
-                    response_text=response_payload.get("response_text") if isinstance(response_payload.get("response_text"), str) else None,
-                    error=None,
-                    error_message=None,
-                    service_name=upstream_service,
-                    model_status=upstream_model_status,
-                ),
+                {
+                    **build_text_service_prompt_test_response(
+                        ok=True,
+                        text_service_reachable=True,
+                        stub=upstream_stub,
+                        response_text=response_payload.get("response_text") if isinstance(response_payload.get("response_text"), str) else None,
+                        error=None,
+                        error_message=None,
+                        service_name=upstream_service,
+                        model_status=upstream_model_status,
+                    ),
+                    "model_profile": selected_profile_id,
+                    "model_profile_label": selected_profile.get("label"),
+                },
             )
             return
 
@@ -3751,16 +4364,20 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
         self.send_json(
             status_code,
-            build_text_service_prompt_test_response(
-                ok=False,
-                text_service_reachable=True,
-                stub=upstream_stub,
-                response_text=None,
-                error=error_value,
-                error_message=error_message,
-                service_name=upstream_service,
-                model_status=upstream_model_status,
-            ),
+            {
+                **build_text_service_prompt_test_response(
+                    ok=False,
+                    text_service_reachable=True,
+                    stub=upstream_stub,
+                    response_text=None,
+                    error=error_value,
+                    error_message=error_message,
+                    service_name=upstream_service,
+                    model_status=upstream_model_status,
+                ),
+                "model_profile": selected_profile_id,
+                "model_profile_label": selected_profile.get("label"),
+            },
         )
 
     def serve_index(self) -> None:
@@ -3839,6 +4456,16 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
         self.serve_file(target, read_error_status=HTTPStatus.NOT_FOUND, download_name=item["file_name"])
 
+    def serve_export(self, request_path: str) -> None:
+        target = resolve_export_request_path(request_path)
+        if target is None:
+            self.send_json(HTTPStatus.NOT_FOUND, {"status": "error", "reason": "not_found"})
+            return
+        if not is_accessible_output_file(target):
+            self.send_json(HTTPStatus.NOT_FOUND, {"status": "error", "reason": "not_found"})
+            return
+        self.serve_file(target, read_error_status=HTTPStatus.NOT_FOUND)
+
     def serve_output(self, request_path: str) -> None:
         target = resolve_output_request_path(request_path)
         if target is None:
@@ -3875,15 +4502,108 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        cleanup_report = enforce_result_retention()
+        store_records = list_result_store_records()
         items = list_stored_results(limit=limit)
+        storage_summary = build_results_storage_summary(
+            app_results_count=len(store_records),
+            cleanup_report=cleanup_report,
+        )
         self.send_json(
             HTTPStatus.OK,
-            {
-                "status": "ok",
-                "count": len(items),
-                "limit": limit,
-                "items": items,
-            },
+            result_output.build_results_list_response(
+                count=len(items),
+                total_count=len(store_records),
+                limit=limit,
+                items=items,
+                storage=storage_summary,
+            ),
+        )
+
+    def handle_result_export(self) -> None:
+        payload = self.read_json_body()
+        if payload is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_results_error_response(
+                    error_type="invalid_request",
+                    blocker="invalid_json",
+                    message="Export request payload is invalid.",
+                ),
+            )
+            return
+
+        result_id = str(payload.get("result_id") or "").strip()
+        if not result_id:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_results_error_response(
+                    error_type="invalid_request",
+                    blocker="missing_result_id",
+                    message="result_id is required.",
+                ),
+            )
+            return
+
+        try:
+            export_payload = create_result_export(result_id)
+        except ResultStoreError as exc:
+            self.send_json(
+                exc.status_code,
+                build_results_error_response(
+                    error_type=exc.error_type,
+                    blocker=exc.blocker,
+                    message=exc.message,
+                ),
+            )
+            return
+
+        self.send_json(
+            HTTPStatus.OK,
+            result_output.build_result_export_success_response(export_payload),
+        )
+
+    def handle_result_delete(self) -> None:
+        payload = self.read_json_body()
+        if payload is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_results_error_response(
+                    error_type="invalid_request",
+                    blocker="invalid_json",
+                    message="Delete request payload is invalid.",
+                ),
+            )
+            return
+
+        result_id = str(payload.get("result_id") or "").strip()
+        if not result_id:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_results_error_response(
+                    error_type="invalid_request",
+                    blocker="missing_result_id",
+                    message="result_id is required.",
+                ),
+            )
+            return
+
+        try:
+            delete_payload = delete_stored_result(result_id)
+        except ResultStoreError as exc:
+            self.send_json(
+                exc.status_code,
+                build_results_error_response(
+                    error_type=exc.error_type,
+                    blocker=exc.blocker,
+                    message=exc.message,
+                ),
+            )
+            return
+
+        self.send_json(
+            HTTPStatus.OK,
+            result_output.build_result_delete_success_response(delete_payload),
         )
 
     def serve_file(
@@ -3913,18 +4633,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
     def handle_input_image_upload(self) -> None:
         content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type.lower():
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_upload_error_response(
-                    error_type="invalid_request",
-                    blocker="invalid_multipart",
-                    message="Upload request must be multipart/form-data.",
-                ),
-            )
-            return
 
         try:
+            image_input_validation.validate_multipart_content_type(content_type)
             raw_body = self.read_body_bytes()
             original_name, payload, source_type = parse_multipart_image(content_type, raw_body)
             stored_payload = store_uploaded_image(original_name, payload, source_type)
@@ -3963,18 +4674,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
     def handle_reference_image_upload(self) -> None:
         content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type.lower():
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_upload_error_response(
-                    error_type="invalid_request",
-                    blocker="invalid_multipart",
-                    message="Upload request must be multipart/form-data.",
-                ),
-            )
-            return
 
         try:
+            image_input_validation.validate_multipart_content_type(content_type)
             raw_body = self.read_body_bytes()
             original_name, payload, _ = parse_multipart_image(content_type, raw_body)
             stored_payload = store_reference_image(original_name, payload)
@@ -4013,18 +4715,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
     def handle_multi_reference_image_upload(self) -> None:
         content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type.lower():
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_upload_error_response(
-                    error_type="invalid_request",
-                    blocker="invalid_multipart",
-                    message="Upload request must be multipart/form-data.",
-                ),
-            )
-            return
 
         try:
+            image_input_validation.validate_multipart_content_type(content_type)
             raw_body = self.read_body_bytes()
             original_name, payload, slot_index = parse_multipart_multi_reference_image(content_type, raw_body)
             stored_payload = store_multi_reference_image(original_name, payload, slot_index=slot_index)
@@ -4063,18 +4756,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
     def handle_identity_transfer_role_upload(self) -> None:
         content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type.lower():
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                build_upload_error_response(
-                    error_type="invalid_request",
-                    blocker="invalid_multipart",
-                    message="Upload request must be multipart/form-data.",
-                ),
-            )
-            return
 
         try:
+            image_input_validation.validate_multipart_content_type(content_type)
             raw_body = self.read_body_bytes()
             original_name, payload, role = parse_multipart_identity_transfer_role_image(content_type, raw_body)
             stored_payload = store_identity_transfer_role_image(original_name, payload, role=role)

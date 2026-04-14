@@ -9,6 +9,35 @@ from pathlib import Path
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+try:
+    import text_prompting as tp
+    from text_prompting import (
+        DEFAULT_LONG_FORM_WORD_TARGET,
+        MAX_LONG_FORM_WORD_TARGET,
+        PROMPT_PROFILE_IMAGE,
+        PROMPT_PROFILE_INFO,
+        PROMPT_PROFILE_REWRITE,
+        PROMPT_PROFILE_SHORT,
+        PROMPT_PROFILE_WRITING,
+        TEXT_WORK_MODE_IMAGE,
+        TEXT_WORK_MODE_REWRITE,
+        TEXT_WORK_MODE_WRITING,
+    )
+except ModuleNotFoundError:
+    from python import text_prompting as tp
+    from python.text_prompting import (
+        DEFAULT_LONG_FORM_WORD_TARGET,
+        MAX_LONG_FORM_WORD_TARGET,
+        PROMPT_PROFILE_IMAGE,
+        PROMPT_PROFILE_INFO,
+        PROMPT_PROFILE_REWRITE,
+        PROMPT_PROFILE_SHORT,
+        PROMPT_PROFILE_WRITING,
+        TEXT_WORK_MODE_IMAGE,
+        TEXT_WORK_MODE_REWRITE,
+        TEXT_WORK_MODE_WRITING,
+    )
+
 
 DEFAULT_SERVICE_NAME = "local-text-service"
 DEFAULT_MODEL_STATUS = "not_configured"
@@ -26,28 +55,32 @@ DEFAULT_RESPONSE_PROFILE = "concise_help"
 MAX_PROMPT_LENGTH = 2000
 RUNNER_PROBE_TIMEOUT_SECONDS = 1.0
 RUNNER_CONNECT_TIMEOUT_SECONDS = 0.25
-RUNNER_PROMPT_TIMEOUT_SECONDS = 30.0
-RUNNER_MAX_TOKENS = 80
+RUNNER_PROMPT_TIMEOUT_SECONDS = 90.0
+RUNNER_MAX_TOKENS = 220
 RUNNER_TEMPERATURE = 0.1
 RUNNER_TOP_P = 0.78
 RUNNER_REPEAT_PENALTY = 1.18
 RUNNER_STOP_SEQUENCES = ["\n\n\n", "\nUser:", "\nBenutzer:", "\nSystem:", "<|im_end|>"]
+RUNNER_LONG_FORM_STOP_SEQUENCES = ["\nUser:", "\nBenutzer:", "\nSystem:", "<|im_end|>"]
 RESPONSE_MAX_CHARACTERS = 320
 IMAGE_PROMPT_MAX_CHARACTERS = 240
-LONG_FORM_RESPONSE_MAX_CHARACTERS = 4200
+LONG_FORM_RESPONSE_MAX_CHARACTERS = 20000
 MAX_VISIBLE_SENTENCES = 2
-DEFAULT_LONG_FORM_WORD_TARGET = 110
 MIN_LONG_FORM_WORDS = 55
-MAX_LONG_FORM_WORD_TARGET = 420
 RUNNER_LONG_FORM_MIN_TOKENS = 220
-RUNNER_LONG_FORM_MAX_TOKENS = 620
-RUNNER_LONG_FORM_TIMEOUT_SECONDS = 60.0
+RUNNER_LONG_FORM_MAX_TOKENS = 2800
+RUNNER_CONTEXT_LIMIT_TOKENS = 4096
+RUNNER_CONTINUATION_MAX_TOKENS = 480
+CONTINUATION_CONTEXT_CHARACTERS = 1400
+MAX_CONTINUATION_ATTEMPTS = 3
+MAX_UNDERLENGTH_CONTINUATION_ATTEMPTS = 2
+RUNNER_LONG_FORM_TIMEOUT_SECONDS = 600.0
 
-PROMPT_PROFILE_IMAGE = "image_prompt_help"
-PROMPT_PROFILE_REWRITE = "rewrite"
-PROMPT_PROFILE_INFO = "info_text"
-PROMPT_PROFILE_WRITING = "writing_task"
-PROMPT_PROFILE_SHORT = "short_answer"
+VALID_TEXT_WORK_MODES = {
+    TEXT_WORK_MODE_WRITING,
+    TEXT_WORK_MODE_REWRITE,
+    TEXT_WORK_MODE_IMAGE,
+}
 
 
 class TextServiceConfigError(Exception):
@@ -137,7 +170,7 @@ def load_config(path: Path | None = None) -> dict:
         raise TextServiceConfigError(f"config missing: {resolved_path}")
 
     try:
-        payload = json.loads(resolved_path.read_text(encoding="utf-8"))
+        payload = json.loads(resolved_path.read_text(encoding="utf-8-sig"))
     except OSError as exc:
         raise TextServiceConfigError(f"config unreadable: {exc}") from exc
     except json.JSONDecodeError as exc:
@@ -215,6 +248,14 @@ def probe_runner_reachable(host: str, port: int) -> bool:
     return False
 
 
+def probe_runner_port_open(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=RUNNER_CONNECT_TIMEOUT_SECONDS):
+            return True
+    except OSError:
+        return False
+
+
 def extract_runner_response_text(payload: object) -> str | None:
     if not isinstance(payload, dict):
         return None
@@ -243,9 +284,44 @@ def extract_runner_response_text(payload: object) -> str | None:
     return None
 
 
-def extract_requested_word_target(prompt: str) -> int | None:
+def estimate_message_token_usage(messages: list[dict[str, str]]) -> int:
+    estimated_tokens = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = str(message.get("content") or "")
+        role = str(message.get("role") or "")
+        estimated_tokens += max(12, len(content) // 2)
+        estimated_tokens += max(2, len(role) // 4)
+        estimated_tokens += 16
+    return estimated_tokens + 48
+
+
+def extract_requested_word_bounds(prompt: str) -> tuple[int, int] | None:
+    return tp.extract_requested_word_bounds(prompt)
+    range_match = re.search(
+        r"\b(?:zwischen|between)?\s*(\d{2,4})\s*(?:-|–|—|bis|to|and|und)\s*(\d{2,4})\s*(?:woerter|woertern|worte|worten|w\u00f6rter|w\u00f6rtern|words)\b",
+        prompt,
+        flags=re.IGNORECASE,
+    )
+    if range_match:
+        try:
+            lower_target = int(range_match.group(1))
+            upper_target = int(range_match.group(2))
+        except ValueError:
+            lower_target = 0
+            upper_target = 0
+        if lower_target > 0 and upper_target > 0:
+            if lower_target > upper_target:
+                lower_target, upper_target = upper_target, lower_target
+            if upper_target < 40:
+                return None
+            lower_target = max(40, lower_target)
+            upper_target = max(lower_target, min(MAX_LONG_FORM_WORD_TARGET, upper_target))
+            return lower_target, upper_target
+
     match = re.search(
-        r"\b(?:ca\.?|circa|etwa|ungefaehr|ungef\u00e4hr)?\s*(\d{2,4})\s*(?:woerter|worte|worten|w\u00f6rter|w\u00f6rtern|words)\b",
+        r"\b(?:ca\.?|circa|etwa|ungefaehr|ungef\u00e4hr)?\s*(\d{2,4})\s*(?:woerter|woertern|worte|worten|w\u00f6rter|w\u00f6rtern|words)\b",
         prompt,
         flags=re.IGNORECASE,
     )
@@ -257,12 +333,21 @@ def extract_requested_word_target(prompt: str) -> int | None:
     except ValueError:
         return None
 
-    if target < 40 or target > MAX_LONG_FORM_WORD_TARGET:
+    if target < 40:
         return None
-    return target
+    target = min(MAX_LONG_FORM_WORD_TARGET, target)
+    return build_word_target_window(target)
 
 
+def extract_requested_word_target(prompt: str) -> int | None:
+    return tp.extract_requested_word_target(prompt)
+    bounds = extract_requested_word_bounds(prompt)
+    if bounds is None:
+        return None
+    lower_bound, upper_bound = bounds
+    return int(round((lower_bound + upper_bound) / 2))
 def infer_requested_format(prompt: str) -> str | None:
+    return tp.infer_requested_format(prompt)
     normalized = prompt.lower()
     if "brief" in normalized or "liebesbrief" in normalized:
         return "Brief"
@@ -280,6 +365,7 @@ def infer_requested_format(prompt: str) -> str | None:
 
 
 def extract_style_hints(prompt: str) -> list[str]:
+    return tp.extract_style_hints(prompt)
     normalized = prompt.lower()
     style_markers = (
         ("liebevoll", "liebevoll"),
@@ -302,7 +388,77 @@ def extract_style_hints(prompt: str) -> list[str]:
     return hints
 
 
+def infer_prompt_language(prompt: str) -> str | None:
+    return tp.infer_prompt_language(prompt)
+    normalized = f" {prompt.lower()} "
+    explicit_english_markers = (" in english ", " auf englisch ", " english ", " englisch ")
+    explicit_spanish_markers = (" in spanish ", " auf spanisch ", " spanish ", " spanisch ", " espanol ", " español ")
+    explicit_french_markers = (" in french ", " auf franzoesisch ", " french ", " francais ", " français ", " franzoesisch ")
+    if any(marker in normalized for marker in explicit_english_markers):
+        return "en"
+    if any(marker in normalized for marker in explicit_spanish_markers):
+        return "es"
+    if any(marker in normalized for marker in explicit_french_markers):
+        return "fr"
+    english_markers = (" the ", " and ", " with ", " into ", " rewrite ", " draft ", " words ")
+    spanish_markers = (" el ", " la ", " los ", " las ", " con ", " para ", " reescribe ", " palabras ")
+    french_markers = (" le ", " la ", " les ", " avec ", " pour ", " réécris ", " mots ")
+    german_markers = (" der ", " die ", " das ", " und ", " mit ", " fuer ", " woerter ", " überarbeite ")
+
+    marker_sets = [
+        ("en", english_markers),
+        ("es", spanish_markers),
+        ("fr", french_markers),
+        ("de", german_markers),
+    ]
+    scores = []
+    for language_code, markers in marker_sets:
+        score = sum(marker in normalized for marker in markers)
+        scores.append((language_code, score))
+    best_language, best_score = max(scores, key=lambda entry: entry[1])
+    if best_score < 2:
+        return None
+    return best_language
+
+
+def build_explicit_language_instruction(language_code: str | None) -> str | None:
+    return tp.build_explicit_language_instruction(language_code)
+    if language_code == "en":
+        return "Antworte vollstaendig auf Englisch. Verwende kein Deutsch."
+    if language_code == "es":
+        return "Antworte vollstaendig auf Spanisch. Verwende kein Deutsch."
+    if language_code == "fr":
+        return "Antworte vollstaendig auf Franzoesisch. Verwende kein Deutsch."
+    if language_code == "de":
+        return "Antworte vollstaendig auf Deutsch."
+    return None
+
+
+def is_translation_request(prompt: str) -> bool:
+    normalized = f" {prompt.lower()} "
+    markers = (
+        " translate ",
+        " translation ",
+        " uebersetze ",
+        " übersetze ",
+        " ins englische ",
+        " auf englisch ",
+        " into english ",
+        " in english ",
+        " ins spanische ",
+        " auf spanisch ",
+        " into spanish ",
+        " in spanish ",
+        " ins franzoesische ",
+        " auf franzoesisch ",
+        " into french ",
+        " in french ",
+    )
+    return any(marker in normalized for marker in markers)
+
+
 def build_word_target_window(word_target: int) -> tuple[int, int]:
+    return tp.build_word_target_window(word_target)
     tolerance = max(8, int(word_target * 0.1))
     minimum_words = max(40, word_target - tolerance)
     maximum_words = word_target + tolerance
@@ -310,6 +466,7 @@ def build_word_target_window(word_target: int) -> tuple[int, int]:
 
 
 def build_requested_format_instruction(requested_format: str | None) -> str | None:
+    return tp.build_requested_format_instruction(requested_format)
     if requested_format == "Brief":
         return "Schreibe einen echten Brief mit Anrede, Hauptteil und Schlussformel in ganzen Saetzen."
     if requested_format == "Kartentext":
@@ -323,62 +480,174 @@ def build_requested_format_instruction(requested_format: str | None) -> str | No
     return None
 
 
-def build_word_target_instruction(word_target: int | None, *, retry: bool = False) -> str:
-    if word_target is None:
+def build_word_target_instruction(
+    word_target: int | None,
+    *,
+    retry: bool = False,
+    word_bounds: tuple[int, int] | None = None,
+) -> str:
+    return tp.build_word_target_instruction(word_target, retry=retry, word_bounds=word_bounds)
+    if word_target is None and word_bounds is None:
         return "Liefere einen kompakten, aber vollstaendigen Text."
-    minimum_words, maximum_words = build_word_target_window(word_target)
+    if word_bounds is None:
+        if word_target is None:
+            return "Liefere einen kompakten, aber vollstaendigen Text."
+        minimum_words, maximum_words = build_word_target_window(word_target)
+        target_text = f"ungefaehr {word_target} Woerter"
+    else:
+        minimum_words, maximum_words = word_bounds
+        target_text = f"moeglichst zwischen {minimum_words} und {maximum_words} Woertern"
     if retry:
         return (
-            f"Ziel: ungefaehr {word_target} Woerter. Schreibe mindestens {minimum_words} und hoechstens {maximum_words} Woerter. "
-            f"Der erste Entwurf war zu kurz. Unterschreite {minimum_words} Woerter nicht."
+            f"Ziel: {target_text}. Schreibe mindestens {minimum_words} und hoechstens {maximum_words} Woerter. "
+            "Halte die Wortspanne diesmal deutlich genauer ein und falle weder klar darunter noch deutlich darueber."
         )
     return (
-        f"Ziel: ungefaehr {word_target} Woerter. Schreibe moeglichst zwischen {minimum_words} und {maximum_words} Woertern. "
-        "Eine kleine Abweichung ist okay, aber bleibe moeglichst nah daran."
+        f"Ziel: {target_text}. "
+        "Eine kleine Abweichung ist okay, aber bleibe moeglichst nah daran und vermeide klare Unter- oder Ueberschreitungen."
     )
 
 
 def count_response_words(text: str) -> int:
+    return tp.count_response_words(text)
     return len(re.findall(r"[A-Za-z0-9\u00c0-\u024f\u00df]+(?:['-][A-Za-z0-9\u00c0-\u024f\u00df]+)*", text))
 
 
-def build_runner_request_settings(profile: str, prompt: str, *, retry: bool = False) -> dict:
+def calculate_word_bounds_distance(word_bounds: tuple[int, int] | None, actual_words: int) -> int:
+    return tp.calculate_word_bounds_distance(word_bounds, actual_words)
+    if word_bounds is None:
+        return 0
+    minimum_words, maximum_words = word_bounds
+    if actual_words < minimum_words:
+        return minimum_words - actual_words
+    if actual_words > maximum_words:
+        return actual_words - maximum_words
+    return 0
+
+
+def should_prefer_retry_by_word_bounds(
+    word_bounds: tuple[int, int] | None,
+    *,
+    first_words: int,
+    retry_words: int,
+) -> bool:
+    return tp.should_prefer_retry_by_word_bounds(
+        word_bounds,
+        first_words=first_words,
+        retry_words=retry_words,
+    )
+    if word_bounds is None:
+        return retry_words >= first_words
+    first_distance = calculate_word_bounds_distance(word_bounds, first_words)
+    retry_distance = calculate_word_bounds_distance(word_bounds, retry_words)
+    return retry_distance <= first_distance
+
+
+def build_runner_request_settings(
+    profile: str,
+    prompt: str,
+    *,
+    retry: bool = False,
+    previous_response: str | None = None,
+) -> dict:
     word_target = extract_requested_word_target(prompt)
+    word_bounds = extract_requested_word_bounds(prompt)
     max_tokens = RUNNER_MAX_TOKENS
     timeout_seconds = RUNNER_PROMPT_TIMEOUT_SECONDS
 
     if profile == PROMPT_PROFILE_REWRITE:
-        max_tokens = 120
+        if word_target is not None:
+            target_words = word_target
+            minimum_tokens = 320 if target_words <= 180 else 240
+            _, maximum_words = word_bounds or build_word_target_window(target_words)
+            multiplier = 1.7 if maximum_words <= 180 else 1.55
+            max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, max(minimum_tokens, int(maximum_words * multiplier)))
+            timeout_seconds = RUNNER_LONG_FORM_TIMEOUT_SECONDS
+        elif len(prompt) > 700:
+            max_tokens = 220
+            timeout_seconds = 75.0
+        else:
+            max_tokens = 120
+            timeout_seconds = 45.0
     elif profile == PROMPT_PROFILE_INFO:
         target_words = word_target or DEFAULT_LONG_FORM_WORD_TARGET
-        max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, max(RUNNER_LONG_FORM_MIN_TOKENS, int(target_words * 2.0)))
+        if word_bounds is not None:
+            _, maximum_words = word_bounds
+            max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, max(RUNNER_LONG_FORM_MIN_TOKENS, int(maximum_words * 1.45)))
+        else:
+            max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, max(RUNNER_LONG_FORM_MIN_TOKENS, int(target_words * 1.8)))
         timeout_seconds = RUNNER_LONG_FORM_TIMEOUT_SECONDS if word_target else 45.0
     elif profile == PROMPT_PROFILE_WRITING:
         target_words = word_target or DEFAULT_LONG_FORM_WORD_TARGET
-        minimum_tokens = 300 if word_target is not None and word_target <= 160 else RUNNER_LONG_FORM_MIN_TOKENS
-        max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, max(minimum_tokens, int(target_words * 2.3)))
+        if word_bounds is not None:
+            _, maximum_words = word_bounds
+            minimum_tokens = 320 if maximum_words <= 180 else RUNNER_LONG_FORM_MIN_TOKENS
+            multiplier = 1.72 if maximum_words <= 180 else 1.52
+            max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, max(minimum_tokens, int(maximum_words * multiplier)))
+        else:
+            minimum_tokens = 300 if word_target is not None and word_target <= 160 else RUNNER_LONG_FORM_MIN_TOKENS
+            max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, max(minimum_tokens, int(target_words * 2.0)))
         timeout_seconds = RUNNER_LONG_FORM_TIMEOUT_SECONDS if word_target else 45.0
 
-    if retry and profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
-        max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, int(max_tokens * 1.12))
-        timeout_seconds = min(70.0, timeout_seconds + 8.0)
+    if retry and profile == PROMPT_PROFILE_REWRITE:
+        if word_target is not None or word_bounds is not None or len(prompt) > 700:
+            previous_word_count = count_response_words(previous_response or "")
+            previous_incomplete = has_incomplete_long_form_ending(previous_response or "")
+            if word_bounds is not None and previous_word_count:
+                minimum_words, maximum_words = word_bounds
+                if previous_incomplete:
+                    max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, int(max_tokens * 1.22))
+                    timeout_seconds = min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, timeout_seconds + 35.0)
+                elif previous_word_count > maximum_words:
+                    max_tokens = min(max_tokens, max(170, int(maximum_words * 1.35)))
+                    timeout_seconds = min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, timeout_seconds + 15.0)
+                elif previous_word_count < minimum_words:
+                    underlength_multiplier = 1.5 if maximum_words <= 180 else 1.24
+                    if infer_prompt_language(prompt) in {"en", "es", "fr"}:
+                        underlength_multiplier = max(underlength_multiplier, 1.28)
+                    max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, int(max_tokens * underlength_multiplier))
+                    timeout_seconds = min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, timeout_seconds + 45.0)
+            else:
+                max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, int(max_tokens * 1.18))
+                timeout_seconds = min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, timeout_seconds + 45.0)
+    elif retry and profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
+        previous_word_count = count_response_words(previous_response or "")
+        word_bounds = extract_requested_word_bounds(prompt)
+        if word_bounds is not None and previous_word_count:
+            minimum_words, maximum_words = word_bounds
+            if previous_word_count < minimum_words:
+                underlength_multiplier = 1.42 if maximum_words <= 220 else 1.28
+                max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, int(max_tokens * underlength_multiplier))
+                timeout_seconds = min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, timeout_seconds + 60.0)
+        if has_incomplete_long_form_ending(previous_response or ""):
+            max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, int(max_tokens * 1.24))
+            timeout_seconds = min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, timeout_seconds + 35.0)
+        else:
+            max_tokens = min(RUNNER_LONG_FORM_MAX_TOKENS, int(max_tokens * 1.12))
+            timeout_seconds = min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, timeout_seconds + 25.0)
 
     return {
         "max_tokens": int(max_tokens),
         "timeout_seconds": float(timeout_seconds),
+        "stop_sequences": (
+            RUNNER_LONG_FORM_STOP_SEQUENCES
+            if profile in (PROMPT_PROFILE_REWRITE, PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING)
+            else RUNNER_STOP_SEQUENCES
+        ),
     }
 
 
 def classify_prompt_profile(prompt: str) -> str:
+    return tp.classify_prompt_profile(prompt)
     normalized = prompt.lower()
     word_target = extract_requested_word_target(prompt)
 
     image_keywords = (
         "bildprompt",
         "prompt fuer ein bild",
-        "prompt für ein bild",
+        "prompt fÃ¼r ein bild",
         "prompt fuer ein foto",
-        "prompt für ein foto",
+        "prompt fÃ¼r ein foto",
         "erstelle einen prompt",
         "schreibe einen prompt",
         "bild prompt",
@@ -390,10 +659,10 @@ def classify_prompt_profile(prompt: str) -> str:
         "umschreiben",
         "schreibe um",
         "kuerzer um",
-        "kürzer um",
+        "kÃ¼rzer um",
         "schreibe eleganter",
         "schreibe fluessiger",
-        "schreibe flüssiger",
+        "schreibe flÃ¼ssiger",
         "verbessere diesen text",
         "formuliere den folgenden",
         "formuliere folgenden",
@@ -439,28 +708,28 @@ def classify_prompt_profile(prompt: str) -> str:
         "romantisch",
         "goethe",
         "persoenlich",
-        "persÃ¶nlich",
+        "persÃƒÂ¶nlich",
     )
     info_keywords = (
         "infotext",
         "sachtext",
         "fachtext",
         "erklaertext",
-        "erklÃ¤rtext",
+        "erklÃƒÂ¤rtext",
         "erklaere",
-        "erklÃ¤re",
+        "erklÃƒÂ¤re",
         "erlaeutere",
-        "erlÃ¤utere",
+        "erlÃƒÂ¤utere",
         "erklaer",
-        "erklÃ¤r",
+        "erklÃƒÂ¤r",
         "sachlich",
         "informativ",
         "fakten",
         "wissenswert",
         "ueberblick",
-        "Ã¼berblick",
+        "ÃƒÂ¼berblick",
     )
-    has_text_over_topic = re.search(r"\btext\s+(?:ueber|Ã¼ber)\b", normalized) is not None
+    has_text_over_topic = re.search(r"\btext\s+(?:ueber|ÃƒÂ¼ber)\b", normalized) is not None
 
     if any(keyword in normalized for keyword in image_keywords):
         return PROMPT_PROFILE_IMAGE
@@ -483,10 +752,25 @@ def classify_prompt_profile(prompt: str) -> str:
     return PROMPT_PROFILE_SHORT
 
 
+def runtime_uses_multilingual_profile(runtime_state: dict | None) -> bool:
+    return tp.runtime_uses_multilingual_profile(runtime_state)
+    if not isinstance(runtime_state, dict):
+        return False
+    for key in ("resolved_model_path", "model_path"):
+        value = runtime_state.get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip().lower()
+        if "gemma" in normalized and "12b" in normalized:
+            return True
+    return False
+
+
 def extract_image_prompt_subject(prompt: str) -> str:
+    return tp.extract_image_prompt_subject(prompt)
     subject = prompt.strip()
     subject = re.sub(
-        r"^(bitte\s+)?(erstelle|schreibe|mach)\s+(mir\s+)?(einen|einen kurzen|einen kompakten)?\s*(bildprompt|prompt)\s+(fuer|für|zu)\s+",
+        r"^(bitte\s+)?(erstelle|schreibe|mach)\s+(mir\s+)?(einen|einen kurzen|einen kompakten)?\s*(bildprompt|prompt)\s+(fuer|fÃ¼r|zu)\s+",
         "",
         subject,
         flags=re.IGNORECASE,
@@ -499,7 +783,7 @@ def extract_image_prompt_subject(prompt: str) -> str:
     )
     subject = re.sub(r"^(ein|eine)\s+bild\s+von\s+", "", subject, flags=re.IGNORECASE)
     subject = re.sub(
-        r"^(ich\s+brauche\s+)?(hilfe\s+bei\s+einem\s+bildprompt|einen\s+bildprompt|einen\s+prompt)\s+(fuer|für|zu)\s+",
+        r"^(ich\s+brauche\s+)?(hilfe\s+bei\s+einem\s+bildprompt|einen\s+bildprompt|einen\s+prompt)\s+(fuer|fÃ¼r|zu)\s+",
         "",
         subject,
         flags=re.IGNORECASE,
@@ -513,28 +797,120 @@ def build_runner_messages(
     *,
     retry: bool = False,
     previous_response: str | None = None,
+    forced_mode: str | None = None,
+    summary: str | None = None,
+    recent_messages: list[dict[str, str]] | None = None,
+    multilingual_runtime: bool = False,
 ) -> tuple[str, list[dict[str, str]]]:
-    profile = classify_prompt_profile(prompt)
+    if forced_mode == TEXT_WORK_MODE_WRITING:
+        profile = PROMPT_PROFILE_WRITING
+    elif forced_mode == TEXT_WORK_MODE_REWRITE:
+        profile = PROMPT_PROFILE_REWRITE
+    elif forced_mode == TEXT_WORK_MODE_IMAGE:
+        profile = PROMPT_PROFILE_IMAGE
+    else:
+        profile = classify_prompt_profile(prompt)
     image_subject = extract_image_prompt_subject(prompt)
     word_target = extract_requested_word_target(prompt)
+    word_bounds = extract_requested_word_bounds(prompt)
     tone_hints = extract_style_hints(prompt)
+    requested_language = infer_prompt_language(prompt)
+    translation_request = is_translation_request(prompt)
     requested_format = infer_requested_format(prompt)
     requested_format_instruction = build_requested_format_instruction(requested_format)
-    system_prompt = (
-        "Du bist eine lokale Text-KI fuer kurze, saubere Einzelantworten. "
-        "Antworte standardmaessig auf Deutsch. "
-        "Verwende keine andere Sprache, ausser wenn du ausdruecklich einen Bildprompt liefern sollst. "
-        "Antworte knapp, klar und ohne Wiederholungen. "
-        "Keine Einleitung ueber deine Aufgabe. "
-        "Kein Fuelltext, kein Marketington, kein Abschweifen. "
-        "Wenn du etwas nicht sicher weisst, bleibe vorsichtig und erfinde keine Details. "
-        "Keine Listen, ausser wenn der Nutzer sie ausdruecklich verlangt."
-    )
-    if profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
-        system_prompt += (
-            " Bei harmlosen Schreibauftraegen lieferst du direkt den gewuenschten Nutztext. "
-            "Erfuelle Format, Ton und grobe Laenge so gut wie moeglich. "
-            "Keine Verweigerung, keine Meta-Hinweise, keine Entschuldigung."
+    summary_text = summary.strip() if isinstance(summary, str) and summary.strip() else None
+    recent_message_lines: list[str] = []
+    if profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING, PROMPT_PROFILE_REWRITE):
+        if word_target is not None and word_target >= 600:
+            summary_text = None
+            recent_messages = []
+        elif word_target is not None and word_target >= 300:
+            recent_messages = []
+    if isinstance(recent_messages, list):
+        for entry in recent_messages:
+            if not isinstance(entry, dict):
+                continue
+            role_value = str(entry.get("role") or "").strip().lower()
+            content_value = str(entry.get("content") or "").strip()
+            if role_value not in {"user", "assistant"} or not content_value:
+                continue
+            role_label = "Nutzer" if role_value == "user" else "KI"
+            recent_message_lines.append(f"{role_label}: {content_value}")
+    context_block = ""
+    if summary_text or recent_message_lines:
+      context_lines = []
+      if summary_text:
+          context_lines.append(f"Chat-Zusammenfassung:\n{summary_text}")
+      if recent_message_lines:
+          context_lines.append("Letzte Chat-Nachrichten:\n" + "\n".join(recent_message_lines[-6:]))
+      context_block = "\n\n" + "\n\n".join(context_lines)
+    if profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING, PROMPT_PROFILE_REWRITE):
+        if multilingual_runtime:
+            system_prompt = (
+                "Du bist eine lokale mehrsprachige Schreib- und Ueberarbeitungs-KI. "
+                "Antworte standardmaessig in derselben Sprache wie die Nutzereingabe. "
+                "Wenn die Nutzereingabe auf Deutsch, Englisch, Spanisch oder Franzoesisch erfolgt, bleibe in dieser Sprache. "
+                "Wechsle die Sprache nicht ohne ausdruecklichen Wunsch. "
+                "Liefere vollstaendige, brauchbare Nutztexte statt knapper Kurzantworten. "
+                "Erfuelle Format, Ton und grobe Laenge so gut wie moeglich. "
+                "Keine Einleitung ueber deine Aufgabe. "
+                "Keine Verweigerung, keine Meta-Hinweise, keine Entschuldigung. "
+                "Kein Marketington, kein Abschweifen, keine erfundenen Details."
+            )
+        else:
+            system_prompt = (
+                "Du bist eine lokale Schreib- und Ueberarbeitungs-KI auf Deutsch. "
+                "Antworte standardmaessig auf Deutsch. "
+                "Liefere vollstaendige, brauchbare Nutztexte statt knapper Kurzantworten. "
+                "Erfuelle Format, Ton und grobe Laenge so gut wie moeglich. "
+                "Keine Einleitung ueber deine Aufgabe. "
+                "Keine Verweigerung, keine Meta-Hinweise, keine Entschuldigung. "
+                "Kein Marketington, kein Abschweifen, keine erfundenen Details."
+            )
+        if profile == PROMPT_PROFILE_WRITING:
+            system_prompt += (
+                " Im Schreibmodus hilfst du bei Szenen, Kapiteln, Ton, Stil und Fortsetzungen. "
+                "Wenn ein Text noch zu kurz ist, fuehrst du ihn sinnvoll weiter statt ihn unnoetig zu verdichten. "
+                "Erwachsene oder dunklere Stoffe werden nicht kuenstlich weichgespuelt."
+            )
+        elif profile == PROMPT_PROFILE_INFO:
+            system_prompt += (
+                " Im Infotextmodus schreibst du ruhig, klar und vollstaendig. "
+                "Du bevorzugst zusammenhaengende Abschnitte statt knapper Stichpunkte."
+            )
+        else:
+            system_prompt += (
+                " Im Rewrite-Modus bewahrst du Inhalt und Substanz. "
+                "Du kuerzt nicht unnoetig und schreibst keine blosse Kurzfassung."
+            )
+        if translation_request:
+            system_prompt += (
+                " Wenn der Auftrag eine Uebersetzung verlangt, zaehlt die ausdruecklich genannte Zielsprache. "
+                "Gib nur den uebersetzten Zieltext aus und lasse keine Saetze in der Quellsprache stehen."
+            )
+    elif multilingual_runtime:
+        system_prompt = (
+            "Du bist eine lokale mehrsprachige Text-KI fuer kurze, saubere Einzelantworten. "
+            "Antworte standardmaessig in derselben Sprache wie die Nutzereingabe. "
+            "Wenn die Nutzereingabe auf Deutsch, Englisch, Spanisch oder Franzoesisch erfolgt, bleibe in dieser Sprache. "
+            "Wechsle die Sprache nicht ohne ausdruecklichen Wunsch. "
+            "Fuer Bildprompts lieferst du weiterhin kurze englische Prompt-Ausgabe. "
+            "Antworte knapp, klar und ohne Wiederholungen. "
+            "Keine Einleitung ueber deine Aufgabe. "
+            "Kein Fuelltext, kein Marketington, kein Abschweifen. "
+            "Wenn du etwas nicht sicher weisst, bleibe vorsichtig und erfinde keine Details. "
+            "Keine Listen, ausser wenn der Nutzer sie ausdruecklich verlangt."
+        )
+    else:
+        system_prompt = (
+            "Du bist eine lokale Text-KI fuer kurze, saubere Einzelantworten. "
+            "Antworte standardmaessig auf Deutsch. "
+            "Verwende keine andere Sprache, ausser wenn du ausdruecklich einen Bildprompt liefern sollst. "
+            "Antworte knapp, klar und ohne Wiederholungen. "
+            "Keine Einleitung ueber deine Aufgabe. "
+            "Kein Fuelltext, kein Marketington, kein Abschweifen. "
+            "Wenn du etwas nicht sicher weisst, bleibe vorsichtig und erfinde keine Details. "
+            "Keine Listen, ausser wenn der Nutzer sie ausdruecklich verlangt."
         )
     if retry:
         if profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
@@ -554,7 +930,7 @@ def build_runner_messages(
                 "No German, no explanation, no full sentence, no list numbering. "
                 "Use 10 to 14 short keyword groups. "
                 "Between 18 and 28 words.\n\n"
-                f"Subject: {image_subject}"
+                f"Scene or text to convert: {prompt}{context_block}"
             )
         else:
             user_prompt = (
@@ -564,30 +940,76 @@ def build_runner_messages(
                 "No explanation, no full sentence, no German words. "
                 "Use 10 to 14 short keyword groups. "
                 "Between 18 and 30 words.\n\n"
-                f"Subject: {image_subject}"
+                f"Scene or text to convert: {prompt}{context_block}"
             )
     elif profile == PROMPT_PROFILE_REWRITE:
-        user_prompt = (
-            "Formuliere den folgenden Text kurz, natuerlich und sauber um. "
-            "Behalte die Bedeutung bei. "
-            "Gib nur die fertige Umformulierung aus. "
-            "Antworte ausschliesslich auf Deutsch. "
-            "Keine Einleitung, keine Erklaerung.\n\n"
-            f"Text: {prompt}"
+        instructions = []
+        instructions.append(
+            "Ueberarbeite den folgenden Text klar, natuerlich und passend zum Auftrag. "
+            "Verbessere Stil, Lesbarkeit, Struktur oder Ton, ohne den Kern unnoetig zu verlieren. "
+            "Bewahre die Substanz des Ausgangstextes; schreibe keine blosse Kurzfassung."
         )
+        if retry and previous_response and has_incomplete_long_form_ending(previous_response):
+            instructions.append(
+                "Der erste Entwurf brach am Ende unvollstaendig ab. Liefere jetzt eine vollstaendige, sauber abgeschlossene Ueberarbeitung."
+            )
+        if retry and word_bounds is not None and previous_response:
+            previous_word_count = count_response_words(previous_response)
+            minimum_words, maximum_words = word_bounds
+            if previous_word_count > maximum_words:
+                instructions.append(
+                    f"Der erste Entwurf war zu lang. Straffe die Ueberarbeitung jetzt auf hoechstens {maximum_words} Woerter, ohne sie in eine Kurzfassung oder blosse Zusammenfassung zu verwandeln."
+                )
+            elif previous_word_count < minimum_words:
+                instructions.append(
+                    f"Der erste Entwurf war zu kurz. Erweitere die Ueberarbeitung jetzt auf mindestens {minimum_words} und hoechstens {maximum_words} Woerter."
+                )
+        if multilingual_runtime:
+            instructions.append(build_explicit_language_instruction(requested_language) or "Bewahre die Sprache der Eingabe.")
+        else:
+            instructions.append("Antworte ausschliesslich auf Deutsch.")
+        if translation_request:
+            instructions.append("Wenn der Auftrag eine Uebersetzung verlangt, gib nur den uebersetzten Zieltext aus.")
+            if requested_language is not None:
+                instructions.append(build_explicit_language_instruction(requested_language) or "")
+        if word_target is not None or word_bounds is not None:
+            instructions.append(build_word_target_instruction(word_target, retry=retry, word_bounds=word_bounds))
+            instructions.append("Liefere eine vollstaendige Ueberarbeitung im gewuenschten Umfang. Ueberschreite die Obergrenze nicht deutlich. Keine Kurzfassung und keine blosse Zusammenfassung.")
+            if word_bounds is not None:
+                minimum_words, maximum_words = word_bounds
+                if maximum_words <= 180:
+                    instructions.append(
+                        f"Forme den Text zu einem vollen, natuerlichen Absatz oder Kurztext mit mindestens {minimum_words} Woertern. Vermeide starke Verdichtung auf nur wenige Saetze."
+                    )
+                    instructions.append("Nutze ungefaehr 7 bis 9 ganze Saetze, damit die Ueberarbeitung kurz, aber vollwertig bleibt.")
+            if retry and word_bounds is not None:
+                minimum_words, maximum_words = word_bounds
+                instructions.append(
+                    f"Pruefe vor dem Beenden die Wortzahl grob und bleibe zwischen {minimum_words} und {maximum_words} Woertern."
+                )
+        instructions.append("Gib nur die fertige Ueberarbeitung aus. Keine Einleitung, keine Erklaerung.")
+        instructions.append(f"Aktueller Text oder Auftrag: {prompt}{context_block}")
+        user_prompt = " ".join(instructions)
     elif profile == PROMPT_PROFILE_INFO:
         instructions = []
         if retry:
             instructions.append(
                 "Der erste Infotext war zu kurz oder zu allgemein. Schreibe denselben Infotext jetzt vollstaendiger."
             )
+            if previous_response and has_incomplete_long_form_ending(previous_response):
+                instructions.append("Der erste Entwurf brach am Ende ab. Liefere jetzt einen vollstaendigen, sauber abgeschlossenen Text.")
             if previous_response:
                 instructions.append("Erweitere den vorhandenen Entwurf statt nur neu anzusetzen.")
         else:
-            instructions.append("Schreibe einen gut lesbaren, sachlich passenden Infotext auf Deutsch.")
+            instructions.append(
+                "Schreibe einen gut lesbaren, sachlich passenden Infotext in derselben Sprache wie der Auftrag."
+                if multilingual_runtime
+                else "Schreibe einen gut lesbaren, sachlich passenden Infotext auf Deutsch."
+            )
         if requested_format_instruction:
             instructions.append(requested_format_instruction)
-        instructions.append(build_word_target_instruction(word_target, retry=retry))
+        target_instruction_words = word_target or DEFAULT_LONG_FORM_WORD_TARGET
+        instructions.append(build_word_target_instruction(target_instruction_words, retry=retry, word_bounds=word_bounds))
         if word_target is not None:
             instructions.append("Pruefe vor dem Beenden kurz die Laenge und erweitere den Text, falls er noch zu kurz ist.")
         if tone_hints:
@@ -595,9 +1017,10 @@ def build_runner_messages(
         instructions.append("Bleibe beim Thema. Keine Listen, ausser wenn sie ausdruecklich verlangt sind.")
         instructions.append("Wenn Fakten unsicher sind, bleibe allgemein statt Details zu erfinden.")
         instructions.append("Keine Einleitung ueber deine Aufgabe und keine Erklaerung danach.")
+        instructions.append("Runde den Text mit einem natuerlichen, ruhigen Schlusssatz ab.")
         if previous_response:
             instructions.append(f"Ausgangsentwurf: {previous_response}")
-        instructions.append(f"Thema: {prompt}")
+        instructions.append(f"Thema: {prompt}{context_block}")
         user_prompt = " ".join(instructions)
     elif profile == PROMPT_PROFILE_WRITING:
         instructions = []
@@ -605,15 +1028,22 @@ def build_runner_messages(
             instructions.append(
                 "Der erste Entwurf war zu kurz oder zu allgemein. Schreibe denselben Text jetzt vollstaendiger und naeher am Wortziel."
             )
+            if previous_response and has_incomplete_long_form_ending(previous_response):
+                instructions.append("Der erste Entwurf brach am Ende ab. Liefere jetzt einen vollstaendigen, sauber abgeschlossenen Schluss.")
             if previous_response:
                 instructions.append("Erweitere den vorhandenen Entwurf statt nur eine neue Mini-Antwort zu schreiben.")
         else:
-            instructions.append("Schreibe den angeforderten Text direkt auf Deutsch.")
+            instructions.append(
+                "Schreibe den angeforderten Text direkt in derselben Sprache wie der Auftrag."
+                if multilingual_runtime
+                else "Schreibe den angeforderten Text direkt auf Deutsch."
+            )
         if requested_format_instruction:
             instructions.append(requested_format_instruction)
-        instructions.append(build_word_target_instruction(word_target, retry=retry))
+        target_instruction_words = word_target or DEFAULT_LONG_FORM_WORD_TARGET
+        instructions.append(build_word_target_instruction(target_instruction_words, retry=retry, word_bounds=word_bounds))
         if retry and word_target is not None:
-            minimum_words, maximum_words = build_word_target_window(word_target)
+            minimum_words, maximum_words = word_bounds or build_word_target_window(word_target)
             instructions.append(
                 f"Erweitere den Text jetzt auf mindestens {minimum_words} und hoechstens {maximum_words} Woerter."
             )
@@ -631,12 +1061,13 @@ def build_runner_messages(
             instructions.append("Erweitere vor allem den Hauptteil des Briefs, nicht nur Anrede und Schluss.")
         if retry and requested_format == "Kartentext":
             instructions.append("Fuege zwei oder drei weitere ganze Saetze hinzu, damit der Kartentext vollstaendig wirkt.")
+        instructions.append("Runde den Text mit einem natuerlichen, stimmigen Schlusssatz ab.")
         instructions.append("Der Text soll vollstaendig und brauchbar wirken, nicht nur aus wenigen Saetzen bestehen.")
         instructions.append("Liefer echten Nutztext statt einer Mini-Antwort.")
         instructions.append("Gib nur den fertigen Text aus. Keine Vorrede, keine Erklaerung, keine Nummerierung.")
         if previous_response:
             instructions.append(f"Ausgangsentwurf: {previous_response}")
-        instructions.append(f"Auftrag: {prompt}")
+        instructions.append(f"Auftrag: {prompt}{context_block}")
         user_prompt = " ".join(instructions)
     else:
         if retry:
@@ -663,6 +1094,153 @@ def build_runner_messages(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
+
+
+def build_continuation_messages(
+    profile: str,
+    prompt: str,
+    partial_text: str,
+    *,
+    multilingual_runtime: bool = False,
+) -> list[dict[str, str]]:
+    requested_language = infer_prompt_language(prompt)
+    if multilingual_runtime:
+        system_prompt = (
+            "Du vollendest unvollstaendige Texte. "
+            "Bleibe strikt in derselben Sprache wie der Auftrag. "
+            "Wiederhole nichts aus dem vorhandenen Text. "
+            "Liefere nur die direkte Fortsetzung bis zu einem sauberen Ende."
+        )
+    else:
+        system_prompt = (
+            "Du vollendest unvollstaendige Texte auf Deutsch. "
+            "Wiederhole nichts aus dem vorhandenen Text. "
+            "Liefere nur die direkte Fortsetzung bis zu einem sauberen Ende."
+        )
+    explicit_language_instruction = build_explicit_language_instruction(requested_language)
+    tail_excerpt = partial_text[-CONTINUATION_CONTEXT_CHARACTERS:].strip()
+    instructions = []
+    if explicit_language_instruction:
+        instructions.append(explicit_language_instruction)
+    instructions.append(
+        "Der vorhandene Text brach am Ende ab. Setze ihn direkt ab den letzten Worten fort, ohne den Anfang neu zu schreiben."
+    )
+    instructions.append("Fuehre den laufenden Satz oder Absatz sauber zu Ende und schliesse den Gesamttext natuerlich ab.")
+    instructions.append(f"Urspruenglicher Auftrag: {prompt}")
+    instructions.append(f"Letzter vorhandener Ausschnitt:\n{tail_excerpt}")
+    user_prompt = " ".join(instructions)
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def build_rewrite_underlength_messages(
+    prompt: str,
+    current_text: str,
+    *,
+    multilingual_runtime: bool = False,
+) -> list[dict[str, str]]:
+    word_bounds = extract_requested_word_bounds(prompt)
+    requested_language = infer_prompt_language(prompt)
+    minimum_words, maximum_words = word_bounds or (0, 0)
+    if multilingual_runtime:
+        system_prompt = (
+            "Du erweiterst eine zu knappe Ueberarbeitung. "
+            "Bleibe strikt in derselben Sprache wie der Auftrag. "
+            "Bewahre Inhalt, Ton und Struktur. "
+            "Gib nur die fertige neue Fassung aus."
+        )
+    else:
+        system_prompt = (
+            "Du erweiterst eine zu knappe Ueberarbeitung auf Deutsch. "
+            "Bewahre Inhalt, Ton und Struktur. "
+            "Gib nur die fertige neue Fassung aus."
+        )
+    instructions: list[str] = []
+    explicit_language_instruction = build_explicit_language_instruction(requested_language)
+    if explicit_language_instruction:
+        instructions.append(explicit_language_instruction)
+    if word_bounds is not None:
+        instructions.append(
+            f"Der aktuelle Rewrite ist noch zu kurz. Erweitere ihn auf mindestens {minimum_words} und hoechstens {maximum_words} Woerter."
+        )
+        if maximum_words <= 180:
+            instructions.append("Schreibe einen vollen, natuerlichen Einzelabsatz mit etwa 7 bis 9 ganzen Saetzen.")
+    instructions.append("Bewahre Aussage, Ton und Schwerpunkt des aktuellen Rewrites. Keine Zusammenfassung, keine Listen.")
+    instructions.append(f"Aktueller Rewrite:\n{current_text.strip()}")
+    instructions.append(f"Urspruenglicher Auftrag:\n{prompt.strip()}")
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": " ".join(instructions)},
+    ]
+
+
+def build_underlength_continuation_messages(
+    profile: str,
+    prompt: str,
+    current_text: str,
+    *,
+    multilingual_runtime: bool = False,
+) -> list[dict[str, str]]:
+    word_bounds = extract_requested_word_bounds(prompt)
+    word_target = extract_requested_word_target(prompt)
+    requested_language = infer_prompt_language(prompt)
+    if word_bounds is not None:
+        minimum_words, maximum_words = word_bounds
+    elif word_target is not None:
+        minimum_words, maximum_words = build_word_target_window(word_target)
+    else:
+        minimum_words, maximum_words = 0, 0
+
+    if multilingual_runtime:
+        system_prompt = (
+            "Du fuehrst einen bereits brauchbaren Text kontrolliert weiter. "
+            "Bleibe strikt in derselben Sprache wie der Auftrag. "
+            "Wiederhole nichts aus dem vorhandenen Text. "
+            "Liefere nur die direkte Fortsetzung mit neuem Nutzinhalt."
+        )
+    else:
+        system_prompt = (
+            "Du fuehrst einen bereits brauchbaren deutschen Text kontrolliert weiter. "
+            "Wiederhole nichts aus dem vorhandenen Text. "
+            "Liefere nur die direkte Fortsetzung mit neuem Nutzinhalt."
+        )
+
+    instructions: list[str] = []
+    explicit_language_instruction = build_explicit_language_instruction(requested_language)
+    if explicit_language_instruction:
+        instructions.append(explicit_language_instruction)
+    if profile == PROMPT_PROFILE_INFO:
+        instructions.append("Der Text ist noch zu kurz. Erweitere ihn mit 1 bis 2 weiteren sinnvollen Abschnitten.")
+    else:
+        instructions.append("Der Text ist noch zu kurz. Setze ihn mit dem naechsten sinnvollen Abschnitt fort.")
+    if minimum_words > 0:
+        instructions.append(
+            f"Der Gesamttext soll mindestens {minimum_words} Woerter erreichen"
+            + (f" und moeglichst unter {maximum_words} Woertern bleiben." if maximum_words > 0 else ".")
+        )
+    instructions.append("Fuehre Inhalt, Ton und Perspektive konsistent weiter.")
+    instructions.append("Wiederhole weder den Anfang noch bereits geschriebene Saetze.")
+    instructions.append("Gib nur die direkte Fortsetzung aus, nicht den Gesamttext.")
+    instructions.append(f"Urspruenglicher Auftrag: {prompt}")
+    instructions.append(f"Bisheriger Text:\n{current_text.strip()}")
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": " ".join(instructions)},
+    ]
+
+
+def merge_continuation_text(base_text: str, continuation_text: str) -> str:
+    base = (base_text or "").rstrip()
+    continuation = strip_common_lead_in(continuation_text or "").lstrip()
+    if not base:
+        return continuation
+    if not continuation:
+        return base
+    if continuation[:1] in {".", ",", ";", ":", "!", "?", "”", "\""}:
+        return f"{base}{continuation}"
+    return f"{base} {continuation}"
 
 
 def remove_consecutive_duplicate_paragraphs(text: str) -> str:
@@ -782,11 +1360,8 @@ def sanitize_runner_response_text(profile: str, response_text: str) -> str:
         return enforce_character_limit(first_line, IMAGE_PROMPT_MAX_CHARACTERS)
 
     if profile == PROMPT_PROFILE_REWRITE:
-        first_line = first_useful_line(normalized)
-        if not first_line:
-            first_line = strip_common_lead_in(normalized)
-        first_line = trim_to_sentence_limit(first_line, 2)
-        return enforce_character_limit(first_line, RESPONSE_MAX_CHARACTERS)
+        cleaned = strip_common_lead_in(normalized)
+        return enforce_character_limit(cleaned, LONG_FORM_RESPONSE_MAX_CHARACTERS)
 
     if profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
         cleaned = strip_common_lead_in(normalized)
@@ -808,8 +1383,34 @@ def has_obvious_repetition(text: str) -> bool:
     return False
 
 
+def has_incomplete_long_form_ending(text: str) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    if re.search(r"[.!?…][\"'”»)]?\s*$", normalized):
+        return False
+    if re.search(r"[:,;\\-–—][\"'”»)]?\s*$", normalized):
+        return True
+    return re.search(r"[A-Za-zÀ-ɏß0-9][\"'”»)]?\s*$", normalized) is not None
+
+
+def trim_to_complete_long_form_ending(text: str) -> str:
+    normalized = text.strip()
+    if not normalized:
+        return ""
+    if not has_incomplete_long_form_ending(normalized):
+        return normalized
+    sentence_matches = list(re.finditer(r"[.!?…][\"'”»)]?(?:\s|$)", normalized))
+    if not sentence_matches:
+        return normalized
+    last_match = sentence_matches[-1]
+    if last_match.end() < len(normalized) // 2:
+        return normalized
+    return normalized[:last_match.end()].rstrip()
+
+
 def has_suspicious_mixed_case_token(text: str) -> bool:
-    return re.search(r"\b[a-zäöüß]+[A-Z][a-zA-Z]+\b", text) is not None
+    return re.search(r"\b[a-zÃ¤Ã¶Ã¼ÃŸ]+[A-Z][a-zA-Z]+\b", text) is not None
 
 
 def has_suspicious_language_mix(text: str) -> bool:
@@ -817,6 +1418,20 @@ def has_suspicious_language_mix(text: str) -> bool:
     english_markers = (" both ", " and ", " the ", " with ", " direction ")
     german_markers = (" der ", " die ", " das ", " weil ", " ist ", " und ")
     return sum(marker in lowered for marker in english_markers) >= 2 and sum(marker in lowered for marker in german_markers) >= 2
+
+
+def rewrite_has_language_mismatch(original_prompt: str, response_text: str) -> bool:
+    requested_language = infer_prompt_language(original_prompt)
+    if requested_language not in {"en", "es", "fr"}:
+        return False
+    response_language = infer_prompt_language(response_text)
+    if response_language == requested_language:
+        return False
+    lowered = f" {response_text.lower()} "
+    german_markers = (" der ", " die ", " das ", " und ", " mit ", " ist ", " eine ", " einen ")
+    if sum(marker in lowered for marker in german_markers) >= 2:
+        return True
+    return response_language not in {requested_language, None}
 
 
 def has_merged_article_token(text: str) -> bool:
@@ -847,6 +1462,17 @@ def rewrite_needs_retry(original_prompt: str, response_text: str) -> bool:
         return True
     if len(normalized_response) < max(12, len(normalized_prompt) // 3):
         return True
+    if rewrite_has_language_mismatch(original_prompt, response_text):
+        return True
+    word_bounds = extract_requested_word_bounds(original_prompt)
+    if word_bounds is not None:
+        minimum_words, maximum_words = word_bounds
+        actual_words = count_response_words(response_text)
+        if actual_words < minimum_words:
+            return True
+        overshoot_tolerance = max(12, int(maximum_words * 0.05))
+        if actual_words > maximum_words + overshoot_tolerance:
+            return True
     return False
 
 
@@ -898,12 +1524,19 @@ def long_form_needs_retry(profile: str, prompt: str, response_text: str) -> bool
         return True
     if has_merged_article_token(normalized):
         return True
+    if has_incomplete_long_form_ending(normalized):
+        return True
 
     word_count = count_response_words(normalized)
     word_target = extract_requested_word_target(prompt)
+    word_bounds = extract_requested_word_bounds(prompt)
     requested_format = infer_requested_format(prompt)
 
-    if word_target is not None and is_significantly_under_word_target(word_target, word_count):
+    if word_bounds is not None:
+        minimum_words, _ = word_bounds
+        if word_count < minimum_words:
+            return True
+    elif word_target is not None and is_significantly_under_word_target(word_target, word_count):
         return True
 
     if profile == PROMPT_PROFILE_WRITING and word_target is None:
@@ -951,14 +1584,17 @@ def response_needs_retry(profile: str, prompt: str, response_text: str) -> bool:
 def request_runner_response(runtime_state: dict, messages: list[dict[str, str]], *, request_settings: dict | None = None) -> str:
     base_url = f"http://{runtime_state['runner_host']}:{runtime_state['runner_port']}"
     request_settings = request_settings or {}
+    requested_max_tokens = int(request_settings.get("max_tokens", RUNNER_MAX_TOKENS))
+    estimated_prompt_tokens = estimate_message_token_usage(messages)
+    safe_max_tokens = max(96, RUNNER_CONTEXT_LIMIT_TOKENS - estimated_prompt_tokens - 64)
     request_payload = {
         "messages": messages,
         "stream": False,
-        "max_tokens": int(request_settings.get("max_tokens", RUNNER_MAX_TOKENS)),
+        "max_tokens": max(32, min(requested_max_tokens, safe_max_tokens)),
         "temperature": RUNNER_TEMPERATURE,
         "top_p": RUNNER_TOP_P,
         "repeat_penalty": RUNNER_REPEAT_PENALTY,
-        "stop": RUNNER_STOP_SEQUENCES,
+        "stop": request_settings.get("stop_sequences", RUNNER_STOP_SEQUENCES),
     }
     request_body = json.dumps(request_payload, ensure_ascii=True).encode("utf-8")
     request = urllib_request.Request(
@@ -978,7 +1614,45 @@ def request_runner_response(runtime_state: dict, messages: list[dict[str, str]],
     except urllib_error.HTTPError as exc:
         response_status = exc.code
         response_body = exc.read()
-    except (urllib_error.URLError, TimeoutError, OSError) as exc:
+    except urllib_error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        reason_text = str(reason)
+        if isinstance(reason, TimeoutError) or "timed out" in reason_text.lower():
+            if probe_runner_port_open(runtime_state["runner_host"], int(runtime_state["runner_port"])):
+                raise TextServiceRequestError(
+                    status_code=HTTPStatus.GATEWAY_TIMEOUT,
+                    error_type="runner_request_timeout",
+                    blocker="runner_request_timeout",
+                    message="Local text runner timed out while still processing the request.",
+                ) from exc
+        raise TextServiceRequestError(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            error_type="runner_request_failed",
+            blocker="runner_unreachable",
+            message=f"Local text runner is not reachable: {exc}",
+        ) from exc
+    except TimeoutError as exc:
+        if probe_runner_port_open(runtime_state["runner_host"], int(runtime_state["runner_port"])):
+            raise TextServiceRequestError(
+                status_code=HTTPStatus.GATEWAY_TIMEOUT,
+                error_type="runner_request_timeout",
+                blocker="runner_request_timeout",
+                message="Local text runner timed out while still processing the request.",
+            ) from exc
+        raise TextServiceRequestError(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            error_type="runner_request_failed",
+            blocker="runner_unreachable",
+            message=f"Local text runner is not reachable: {exc}",
+        ) from exc
+    except OSError as exc:
+        if "timed out" in str(exc).lower() and probe_runner_port_open(runtime_state["runner_host"], int(runtime_state["runner_port"])):
+            raise TextServiceRequestError(
+                status_code=HTTPStatus.GATEWAY_TIMEOUT,
+                error_type="runner_request_timeout",
+                blocker="runner_request_timeout",
+                message="Local text runner timed out while still processing the request.",
+            ) from exc
         raise TextServiceRequestError(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             error_type="runner_request_failed",
@@ -1015,8 +1689,22 @@ def request_runner_response(runtime_state: dict, messages: list[dict[str, str]],
     return response_text
 
 
-def post_runner_prompt(runtime_state: dict, prompt: str) -> str:
-    profile, messages = build_runner_messages(prompt)
+def post_runner_prompt(
+    runtime_state: dict,
+    prompt: str,
+    *,
+    mode: str | None = None,
+    summary: str | None = None,
+    recent_messages: list[dict[str, str]] | None = None,
+) -> str:
+    multilingual_runtime = runtime_uses_multilingual_profile(runtime_state)
+    profile, messages = build_runner_messages(
+        prompt,
+        forced_mode=mode,
+        summary=summary,
+        recent_messages=recent_messages,
+        multilingual_runtime=multilingual_runtime,
+    )
     response_text = request_runner_response(
         runtime_state,
         messages,
@@ -1024,27 +1712,171 @@ def post_runner_prompt(runtime_state: dict, prompt: str) -> str:
     )
     sanitized_response_text = sanitize_runner_response_text(profile, response_text)
     if response_needs_retry(profile, prompt, sanitized_response_text):
-        _, retry_messages = build_runner_messages(prompt, retry=True, previous_response=sanitized_response_text)
+        _, retry_messages = build_runner_messages(
+            prompt,
+            retry=True,
+            previous_response=sanitized_response_text,
+            forced_mode=mode,
+            summary=summary,
+            recent_messages=recent_messages,
+            multilingual_runtime=multilingual_runtime,
+        )
         retry_response_text = request_runner_response(
             runtime_state,
             retry_messages,
-            request_settings=build_runner_request_settings(profile, prompt, retry=True),
+            request_settings=build_runner_request_settings(
+                profile,
+                prompt,
+                retry=True,
+                previous_response=sanitized_response_text,
+            ),
         )
         retry_sanitized_response_text = sanitize_runner_response_text(profile, retry_response_text)
         if not response_needs_retry(profile, prompt, retry_sanitized_response_text):
             sanitized_response_text = retry_sanitized_response_text
         elif retry_sanitized_response_text:
             if profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
-                target_words = extract_requested_word_target(prompt)
-                if target_words is not None:
-                    first_gap = abs(target_words - count_response_words(sanitized_response_text))
-                    retry_gap = abs(target_words - count_response_words(retry_sanitized_response_text))
-                    if retry_gap <= first_gap:
+                first_incomplete = has_incomplete_long_form_ending(sanitized_response_text)
+                retry_incomplete = has_incomplete_long_form_ending(retry_sanitized_response_text)
+                first_words = count_response_words(sanitized_response_text)
+                retry_words = count_response_words(retry_sanitized_response_text)
+                word_bounds = extract_requested_word_bounds(prompt)
+                if first_incomplete and not retry_incomplete:
+                    if should_prefer_retry_by_word_bounds(
+                        word_bounds,
+                        first_words=first_words,
+                        retry_words=retry_words,
+                    ):
                         sanitized_response_text = retry_sanitized_response_text
-                elif count_response_words(retry_sanitized_response_text) >= count_response_words(sanitized_response_text):
-                    sanitized_response_text = retry_sanitized_response_text
+                elif not (retry_incomplete and not first_incomplete):
+                    target_words = extract_requested_word_target(prompt)
+                    if word_bounds is not None:
+                        if should_prefer_retry_by_word_bounds(
+                            word_bounds,
+                            first_words=first_words,
+                            retry_words=retry_words,
+                        ):
+                            sanitized_response_text = retry_sanitized_response_text
+                    elif target_words is not None:
+                        first_gap = abs(target_words - first_words)
+                        retry_gap = abs(target_words - retry_words)
+                        if retry_gap <= first_gap:
+                            sanitized_response_text = retry_sanitized_response_text
+                    elif retry_words >= first_words:
+                        sanitized_response_text = retry_sanitized_response_text
+            elif profile == PROMPT_PROFILE_REWRITE:
+                first_incomplete = has_incomplete_long_form_ending(sanitized_response_text)
+                retry_incomplete = has_incomplete_long_form_ending(retry_sanitized_response_text)
+                first_words = count_response_words(sanitized_response_text)
+                retry_words = count_response_words(retry_sanitized_response_text)
+                if first_incomplete and not retry_incomplete:
+                    word_bounds = extract_requested_word_bounds(prompt)
+                    if should_prefer_retry_by_word_bounds(
+                        word_bounds,
+                        first_words=first_words,
+                        retry_words=retry_words,
+                    ):
+                        sanitized_response_text = retry_sanitized_response_text
+                elif not (retry_incomplete and not first_incomplete):
+                    word_bounds = extract_requested_word_bounds(prompt)
+                    if word_bounds is not None:
+                        if should_prefer_retry_by_word_bounds(
+                            word_bounds,
+                            first_words=first_words,
+                            retry_words=retry_words,
+                        ):
+                            sanitized_response_text = retry_sanitized_response_text
+                    else:
+                        sanitized_response_text = retry_sanitized_response_text
             else:
                 sanitized_response_text = retry_sanitized_response_text
+
+    if profile in (PROMPT_PROFILE_REWRITE, PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
+        completed_text = sanitized_response_text
+        for _ in range(MAX_CONTINUATION_ATTEMPTS):
+            if not has_incomplete_long_form_ending(completed_text):
+                break
+            continuation_messages = build_continuation_messages(
+                profile,
+                prompt,
+                completed_text,
+                multilingual_runtime=multilingual_runtime,
+            )
+            continuation_response_text = request_runner_response(
+                runtime_state,
+                continuation_messages,
+                request_settings={
+                    "max_tokens": RUNNER_CONTINUATION_MAX_TOKENS,
+                    "timeout_seconds": min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, 120.0),
+                    "stop_sequences": RUNNER_LONG_FORM_STOP_SEQUENCES,
+                },
+            )
+            continuation_sanitized_text = sanitize_runner_response_text(profile, continuation_response_text)
+            merged_continuation_text = merge_continuation_text(completed_text, continuation_sanitized_text)
+            if merged_continuation_text == completed_text:
+                break
+            completed_text = merged_continuation_text
+        if has_incomplete_long_form_ending(completed_text):
+            completed_text = trim_to_complete_long_form_ending(completed_text)
+        sanitized_response_text = completed_text
+
+    if profile == PROMPT_PROFILE_REWRITE:
+        word_bounds = extract_requested_word_bounds(prompt)
+        if word_bounds is not None:
+            minimum_words, maximum_words = word_bounds
+            current_words = count_response_words(sanitized_response_text)
+            if current_words < minimum_words and maximum_words <= 180:
+                underlength_messages = build_rewrite_underlength_messages(
+                    prompt,
+                    sanitized_response_text,
+                    multilingual_runtime=multilingual_runtime,
+                )
+                underlength_response_text = request_runner_response(
+                    runtime_state,
+                    underlength_messages,
+                    request_settings={
+                        "max_tokens": min(RUNNER_LONG_FORM_MAX_TOKENS, max(260, int(maximum_words * 1.45))),
+                        "timeout_seconds": min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, 180.0),
+                    },
+                )
+                underlength_sanitized_text = sanitize_runner_response_text(profile, underlength_response_text)
+                if underlength_sanitized_text:
+                    current_distance = calculate_word_bounds_distance(word_bounds, current_words)
+                    expanded_words = count_response_words(underlength_sanitized_text)
+                    expanded_distance = calculate_word_bounds_distance(word_bounds, expanded_words)
+                    if expanded_distance <= current_distance and not rewrite_has_language_mismatch(prompt, underlength_sanitized_text):
+                        sanitized_response_text = underlength_sanitized_text
+    elif profile in (PROMPT_PROFILE_INFO, PROMPT_PROFILE_WRITING):
+        word_bounds = extract_requested_word_bounds(prompt)
+        if word_bounds is not None:
+            minimum_words, maximum_words = word_bounds
+            staged_text = sanitized_response_text
+            for _ in range(MAX_UNDERLENGTH_CONTINUATION_ATTEMPTS):
+                current_words = count_response_words(staged_text)
+                if current_words >= minimum_words:
+                    break
+                remaining_words = max(24, maximum_words - current_words)
+                underlength_messages = build_underlength_continuation_messages(
+                    profile,
+                    prompt,
+                    staged_text,
+                    multilingual_runtime=multilingual_runtime,
+                )
+                underlength_response_text = request_runner_response(
+                    runtime_state,
+                    underlength_messages,
+                    request_settings={
+                        "max_tokens": min(RUNNER_LONG_FORM_MAX_TOKENS, max(120, int(remaining_words * 1.7))),
+                        "timeout_seconds": min(RUNNER_LONG_FORM_TIMEOUT_SECONDS, 180.0),
+                        "stop_sequences": RUNNER_LONG_FORM_STOP_SEQUENCES,
+                    },
+                )
+                underlength_sanitized_text = sanitize_runner_response_text(profile, underlength_response_text)
+                merged_underlength_text = merge_continuation_text(staged_text, underlength_sanitized_text)
+                if merged_underlength_text == staged_text:
+                    break
+                staged_text = merged_underlength_text
+            sanitized_response_text = staged_text
 
     if not sanitized_response_text:
         raise TextServiceRequestError(
@@ -1211,19 +2043,105 @@ def validate_prompt_payload(payload: object) -> str:
     return normalized_prompt
 
 
+def validate_optional_mode_payload(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("mode")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TextServiceRequestError(
+            status_code=HTTPStatus.BAD_REQUEST,
+            error_type="invalid_request",
+            blocker="mode_not_string",
+            message="mode must be a string.",
+        )
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized not in VALID_TEXT_WORK_MODES:
+        raise TextServiceRequestError(
+            status_code=HTTPStatus.BAD_REQUEST,
+            error_type="invalid_request",
+            blocker="invalid_mode",
+            message="mode must be one of writing, rewrite or image_prompt.",
+        )
+    return normalized
+
+
+def validate_optional_summary_payload(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("summary")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TextServiceRequestError(
+            status_code=HTTPStatus.BAD_REQUEST,
+            error_type="invalid_request",
+            blocker="summary_not_string",
+            message="summary must be a string.",
+        )
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized[:900]
+
+
+def validate_optional_recent_messages_payload(payload: object) -> list[dict[str, str]]:
+    if not isinstance(payload, dict):
+        return []
+    value = payload.get("recent_messages")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TextServiceRequestError(
+            status_code=HTTPStatus.BAD_REQUEST,
+            error_type="invalid_request",
+            blocker="recent_messages_not_list",
+            message="recent_messages must be a list.",
+        )
+    validated: list[dict[str, str]] = []
+    for entry in value[:6]:
+        if not isinstance(entry, dict):
+            continue
+        role_value = entry.get("role")
+        content_value = entry.get("content")
+        if not isinstance(role_value, str) or not isinstance(content_value, str):
+            continue
+        normalized_role = role_value.strip().lower()
+        normalized_content = content_value.strip()
+        if normalized_role not in {"user", "assistant"} or not normalized_content:
+            continue
+        validated.append({"role": normalized_role, "content": normalized_content[:400]})
+    return validated
+
+
 class TextServiceServer(ThreadingHTTPServer):
     def __init__(self, server_address: tuple[str, int], handler_class: type[BaseHTTPRequestHandler], config: dict) -> None:
         super().__init__(server_address, handler_class)
         self.config = config
 
+    def get_runtime_config(self) -> dict:
+        config_path_value = self.config.get("config_path")
+        if isinstance(config_path_value, str) and config_path_value.strip():
+            try:
+                updated_config = load_config(Path(config_path_value.strip()))
+            except TextServiceConfigError:
+                return self.config
+            self.config = updated_config
+            return updated_config
+        return self.config
+
     def build_health_payload(self) -> dict:
-        runtime_state = build_runtime_state(self.config)
+        current_config = self.get_runtime_config()
+        runtime_state = build_runtime_state(current_config)
         return {
-            "service": self.config["service_name"],
+            "service": current_config["service_name"],
             "status": "ok",
-            "enabled": self.config["enabled"],
-            "host": self.config["host"],
-            "port": self.config["port"],
+            "enabled": current_config["enabled"],
+            "host": current_config["host"],
+            "port": current_config["port"],
             "service_mode": runtime_state["service_mode"],
             "runner_type": runtime_state["runner_type"],
             "runner_binary_path": runtime_state["runner_binary_path"],
@@ -1238,13 +2156,14 @@ class TextServiceServer(ThreadingHTTPServer):
         }
 
     def build_info_payload(self) -> dict:
-        runtime_state = build_runtime_state(self.config)
+        current_config = self.get_runtime_config()
+        runtime_state = build_runtime_state(current_config)
         return {
-            "service": self.config["service_name"],
+            "service": current_config["service_name"],
             "status": "ok",
-            "enabled": self.config["enabled"],
-            "host": self.config["host"],
-            "port": self.config["port"],
+            "enabled": current_config["enabled"],
+            "host": current_config["host"],
+            "port": current_config["port"],
             "service_mode": runtime_state["service_mode"],
             "runner_type": runtime_state["runner_type"],
             "runner_host": runtime_state["runner_host"],
@@ -1260,7 +2179,7 @@ class TextServiceServer(ThreadingHTTPServer):
             "model_status": runtime_state["model_status"],
             "model_configured": runtime_state["model_configured"],
             "model_present": runtime_state["model_present"],
-            "config_path": self.config["config_path"],
+            "config_path": current_config["config_path"],
             "api_version": "v1",
             "inference_available": runtime_state["inference_available"],
             "prompt_endpoint_available": True,
@@ -1293,15 +2212,19 @@ class TextServiceHandler(BaseHTTPRequestHandler):
         return
 
     def handle_prompt(self) -> None:
+        current_config = self.server.get_runtime_config()
         try:
             payload = self.read_json_body()
             prompt = validate_prompt_payload(payload)
+            mode = validate_optional_mode_payload(payload)
+            summary = validate_optional_summary_payload(payload)
+            recent_messages = validate_optional_recent_messages_payload(payload)
         except TextServiceRequestError as exc:
-            runtime_state = build_runtime_state(self.server.config)
+            runtime_state = build_runtime_state(current_config)
             self.send_json(
                 exc.status_code,
                 build_request_error_response(
-                    service_name=self.server.config["service_name"],
+                    service_name=current_config["service_name"],
                     runtime_state=runtime_state,
                     error_type=exc.error_type,
                     blocker=exc.blocker,
@@ -1310,12 +2233,12 @@ class TextServiceHandler(BaseHTTPRequestHandler):
             )
             return
 
-        runtime_state = build_runtime_state(self.server.config)
+        runtime_state = build_runtime_state(current_config)
         if runtime_state["service_mode"] == "stub":
             self.send_json(
                 HTTPStatus.OK,
                 build_prompt_stub_response(
-                    service_name=self.server.config["service_name"],
+                    service_name=current_config["service_name"],
                     runtime_state=runtime_state,
                     prompt=prompt,
                 ),
@@ -1326,7 +2249,7 @@ class TextServiceHandler(BaseHTTPRequestHandler):
             self.send_json(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 build_request_error_response(
-                    service_name=self.server.config["service_name"],
+                    service_name=current_config["service_name"],
                     runtime_state=runtime_state,
                     error_type="model_not_ready",
                     blocker=runtime_state["service_mode"],
@@ -1336,12 +2259,18 @@ class TextServiceHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            response_text = post_runner_prompt(runtime_state, prompt)
+            response_text = post_runner_prompt(
+                runtime_state,
+                prompt,
+                mode=mode,
+                summary=summary,
+                recent_messages=recent_messages,
+            )
         except TextServiceRequestError as exc:
             self.send_json(
                 exc.status_code,
                 build_request_error_response(
-                    service_name=self.server.config["service_name"],
+                    service_name=current_config["service_name"],
                     runtime_state=runtime_state,
                     error_type=exc.error_type,
                     blocker=exc.blocker,
@@ -1353,7 +2282,7 @@ class TextServiceHandler(BaseHTTPRequestHandler):
         self.send_json(
             HTTPStatus.OK,
             build_prompt_runner_response(
-                service_name=self.server.config["service_name"],
+                service_name=current_config["service_name"],
                 runtime_state=runtime_state,
                 response_text=response_text,
             ),

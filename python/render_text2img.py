@@ -244,6 +244,7 @@ def mutate_workflow(
     denoise_strength: float | None = None,
     input_image_name: str | None = None,
     mask_image_name: str | None = None,
+    grow_mask_by_override: int | None = None,
 ) -> dict[str, Any]:
     mutated = copy.deepcopy(workflow)
 
@@ -284,6 +285,8 @@ def mutate_workflow(
             inputs["cfg"] = cfg
         if denoise_strength is not None and "denoise" in inputs and isinstance(inputs.get("denoise"), (int, float)):
             inputs["denoise"] = denoise_strength
+        if grow_mask_by_override is not None and "grow_mask_by" in inputs and isinstance(inputs.get("grow_mask_by"), (int, float)):
+            inputs["grow_mask_by"] = max(0, int(grow_mask_by_override))
         if "width" in inputs and isinstance(inputs.get("width"), (int, float)):
             inputs["width"] = width
         if "height" in inputs and isinstance(inputs.get("height"), (int, float)):
@@ -465,6 +468,7 @@ def run_render(
     use_inpainting: bool = False,
     mask_image_path: Path | None = None,
     denoise_strength: float = DEFAULT_DENOISE_STRENGTH,
+    grow_mask_by_override: int | None = None,
     base_url: str = DEFAULT_BASE_URL,
     timeout: int = DEFAULT_REQUEST_TIMEOUT,
     wait: bool = False,
@@ -567,6 +571,7 @@ def run_render(
             denoise_strength=normalize_denoise_strength(denoise_strength) if (use_input_image or use_inpainting) else None,
             input_image_name=staged_input_image_name,
             mask_image_name=staged_mask_image_name,
+            grow_mask_by_override=grow_mask_by_override if use_inpainting else None,
         )
 
         client = ComfyClient(base_url=base_url, timeout=timeout)

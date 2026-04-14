@@ -119,6 +119,152 @@
   - kein `/prompt` aus der Haupt-App
   - keine Produktlogik auf Basis des Text-Diensts
 
+## V26 Text-KI-Fundament
+- Die produktive Text-KI in `web/index.html` arbeitet jetzt mit genau 5 festen Chat-Slots.
+- Die Slot- und Verlaufsdaten werden lokal in `data/text_chats.sqlite3` gehalten.
+- Der aktive Slot wird serverseitig mitgefuehrt; nur dieser Chat liefert Kontext fuer neue Textanfragen.
+- Kontextaufbau im App-Server:
+  - aktuelle Eingabe
+  - rollende Kurz-Zusammenfassung aelterer Nachrichten
+  - letzte Nachrichten des aktiven Chats
+- Inaktive Slots bleiben gespeichert, werden aber nicht in den Live-Kontext gegeben.
+- Metadaten pro Slot:
+  - Titel
+  - letztes Aenderungsdatum
+  - Sprache
+  - Modell
+  - Kurz-Zusammenfassung
+- Bestehende Produktfunktionen bleiben erhalten:
+  - Antwortbereich
+  - Copy
+  - Spracheingabe
+  - `Als Bildprompt verwenden`
+- Weiter bewusst nicht umgesetzt:
+  - kein Modellzoo
+  - keine freie Modellimportstrecke
+  - keine offene Endlos-Chatliste
+
+## V27 Text-KI-Arbeitsmodi
+- Das V26-Fundament bleibt erhalten; die Text-KI arbeitet weiter mit 5 festen lokalen Chat-Slots.
+- Der aktive Textbereich hat jetzt genau 3 produktive Arbeitsmodi:
+  - `Schreiben`
+  - `Ueberarbeiten`
+  - `Als Bildprompt umwandeln`
+- Die Moduslogik wird bis in `python/text_service.py` durchgereicht:
+  - `writing` fuer freies Schreiben, Stoffentwicklung und Fortsetzungen
+  - `rewrite` fuer Ueberarbeitung, Umformulierung und stilistische Schaerfung
+  - `image_prompt` fuer knappe, visuelle Prompt-Ausgabe
+- Der aktive Modus wirkt nur auf die aktuelle Textanfrage und nicht auf die Bildarchitektur oder die Slot-Speicherung.
+- Bestehende Hauptfunktionen bleiben im Textbereich erhalten:
+  - Copy
+  - Spracheingabe
+  - `Als Bildprompt verwenden`
+- Weiter bewusst nicht umgesetzt:
+  - keine kuratierten Modell-Slots
+  - kein Modellzoo
+  - keine Autoren-Suite mit Figuren-, Plot- oder Kapitelverwaltung
+
+## V27.1 Browser-Validierung Und Kleine UX-Nacharbeit
+- Die Text-KI wurde danach nochmals real im Browser durchgeklickt:
+  - Slot-Umschalten
+  - neuen Chat anlegen
+  - Umbenennen
+  - Leeren
+  - Moduswechsel
+  - Copy
+  - `Als Bildprompt verwenden`
+  - Reload-Persistenz
+  - sichtbare Kurz-Zusammenfassung bei laengerem Verlauf
+- Kleine echte UX-Korrektur:
+  - nach `Als Bildprompt verwenden` erscheint jetzt auch im Ziel-Bildpfad ein sichtbarer Hinweis `Prompt uebernommen ...`
+- Spracheingabe wurde nur soweit lokal real getestet, wie der Browser ohne erkannte Sprache reagierte (`Kein Text erkannt`).
+
+## V28 Kuratierte Modell-Slots
+- Das V26/V27-Fundament bleibt erhalten; die Text-KI bekommt keine freie Modellliste, sondern genau 3 kuratierte Modellprofile:
+  - `Standard`
+  - `Starkes Schreiben`
+  - `Mehrsprachig`
+- Die Produktsprache bleibt ruhig und nutzerorientiert:
+  - `Standard` = Schnell / Allround
+  - `Starkes Schreiben` = Langtext
+  - `Mehrsprachig` = Reserve
+- Technisch bleibt die Modellwahl an den Chat-Slot gebunden:
+  - pro Chat werden Modellprofil, Sprache, Titel, Zusammenfassung und letzter Stand gespeichert
+  - beim Slotwechsel geht das gespeicherte Profil mit
+- Verfuegbarkeit bleibt bewusst ehrlich:
+  - lokal produktiv aktiv ist aktuell nur das Standardprofil
+  - `Starkes Schreiben` und `Mehrsprachig` sind als vorbereitete Slots sichtbar, aber nicht auswählbar, solange die Zielmodelle lokal nicht vorhanden sind
+- Der aktuelle lokale Realstand:
+  - aktiver Runner arbeitet weiter mit dem vorhandenen GGUF-Standardmodell
+  - kein Modellzoo
+  - kein Download-Center
+  - keine freie Importstrecke im Hauptprodukt
+
+## V29 Kontrollierter Runner-Wechsel
+- Die kuratierten Modellprofile bleiben erhalten; neu ist die technische Wechselbasis im laufenden Text-Stack.
+- Modellwechsel laeuft bewusst kontrolliert und nicht als stiller Fallback:
+  - Chat speichert sein Modellprofil
+  - beim aktiven Chat wird das passende Profil geprueft
+  - wenn noetig, wird der Text-Runner kontrolliert neu initialisiert
+- Statuslinie fuer den Produktzustand:
+  - `Aktiv`
+  - `Laedt`
+  - `Vorbereitet`
+  - `Fehler`
+- Wichtige Realregel:
+  - `Vorbereitet` bleibt fuer lokal noch nicht installierte Zielmodelle sichtbar, aber nicht lauffaehig
+  - Requests mit solchen Profilen werden sauber abgewiesen statt heimlich auf etwas anderes zu fallen
+- Der App-Server startet den Text-Runner fuer den Re-Init jetzt direkt und pollt den lokalen Runner-Port, statt eine freie Modellwelt oder einen Modellzoo aufzumachen.
+- Der Text-Service liest seine Konfiguration fuer Health/Info/Prompt jetzt live nach, damit Modellpfad und Runner-Zustand nach einem Wechsel ehrlich sichtbar bleiben.
+
+## V30 Starkes Schreiben Produktiv
+- `Starkes Schreiben` ist jetzt als echter zweiter kuratierter Text-Slot produktiv verfuegbar.
+- Reales Zielmodell:
+  - `mistral-small-3.1-24b-instruct-2503-jackterated-hf.Q4_K_S.gguf`
+- Ablage:
+  - `vendor/text_models/mistral-small-3.1-24b-instruct-2503-jackterated-hf.Q4_K_S.gguf`
+- Der bestehende kontrollierte Runner-Re-Init aus V29 zieht jetzt real zwischen:
+  - `Standard` -> lokales Qwen-GGUF
+  - `Starkes Schreiben` -> lokales Mistral Small 3.1 24B GGUF
+- Wichtige Nachschaerfungen in `python/app_server.py`:
+  - Profilauflosung trennt `Standard` und `Starkes Schreiben` sauber, auch wenn beide lokal installiert sind
+  - die Text-Uebersicht synchronisiert den Runner wieder auf das Profil des aktiven Chats
+  - nach einem echten Modellwechsel gibt es einen engen Einmal-Retry fuer den ersten Prompt, falls der frisch gestartete Runner kurz noch in einem `503`-Fenster haengt
+- Real getestet:
+  - echter Wechsel `Standard -> Starkes Schreiben`
+  - echter Wechsel `Starkes Schreiben -> Standard`
+  - Schreibtest, Ueberarbeiten und Bildprompt-Ausgabe auf `Starkes Schreiben`
+  - chat-gebundene Profilpersistenz ueber Slotwechsel
+  - sichtbarer Browser-Wechsel `Standard <-> Starkes Schreiben`
+- Bewusst noch nicht umgesetzt:
+  - `Mehrsprachig` bleibt weiter nur vorbereitet
+  - kein Modellzoo
+  - keine freie Quant-Auswahl fuer Nutzer
+
+## V31 Mehrsprachig Produktiv
+- `Mehrsprachig` ist jetzt als echter dritter kuratierter Text-Slot produktiv verfuegbar.
+- Reales Zielmodell:
+  - `google_gemma-3-12b-it-Q5_K_M.gguf`
+- Ablage:
+  - `vendor/text_models/google_gemma-3-12b-it-Q5_K_M.gguf`
+- Der bestehende Runner-Re-Init traegt jetzt real alle drei kuratierten Slots:
+  - `Standard`
+  - `Starkes Schreiben`
+  - `Mehrsprachig`
+- Wichtige Nachschaerfungen:
+  - Runner-Start-Timeout wurde fuer den schwereren Rueckwechsel auf `Starkes Schreiben` robuster gesetzt
+  - der Gemma-Slot folgt jetzt fuer Schreib- und Rewrite-Aufgaben der Sprache der Eingabe statt pauschal auf Deutsch zu antworten
+  - Bildprompt-Ausgabe bleibt auch im Mehrsprachig-Slot bewusst englisch
+- Real getestet:
+  - echter Wechsel `Standard -> Mehrsprachig -> Standard`
+  - echter Wechsel `Starkes Schreiben -> Mehrsprachig -> Starkes Schreiben`
+  - Schreibanfragen auf Deutsch, Englisch und Spanisch
+  - Rewrite auf Franzoesisch
+  - Bildprompt-Ausgabe aus englischer Eingabe
+  - sichtbare Browser-Aktivierung und Statuswechsel fuer `Mehrsprachig`
+- Produktgrenze:
+  - der sichtbare Selenium-Sendelauf blieb browserseitig nicht stabil bis zur fertigen Antwort belegbar, obwohl dieselben Pfade API-seitig real gruen liefen
+
 ## V5 Block 4 Umgesetzt
 - Die Haupt-App kann jetzt einen einzelnen manuellen Prompt-Test gegen den Stub-Endpunkt des Text-Diensts ausloesen.
 - Der neue Schnitt laeuft kontrolliert ueber die Haupt-App und nicht direkt aus dem Browser auf Port `8091`.
@@ -337,3 +483,121 @@
   - kreative Kurztexte mit Wortziel unter oder um 120 Woerter bleiben die sichtbar schwankendste Schreibklasse
   - das aktive 7B-Modell trifft solche Zielmengen jetzt besser, aber noch nicht jedes Mal sauber
   - V8.10 macht den Schreibpfad damit klar brauchbarer, aber noch nicht perfekt laengentreu
+
+## V20 Text-KI-Modellstrategie (ohne Rollout)
+
+### Aktueller Produktstand
+- aktiver Standard bleibt:
+  - `Qwen2.5-7B-Instruct GGUF`
+- aktuell zuverlaessig fuer:
+  - Bildprompt-Hilfe
+  - Umformulieren
+  - kurze Alltagsantworten
+  - einfache Schreibauftraege
+- ehrliche Restgrenze:
+  - kurze Wissensfragen und hohe fachliche Praezision schwanken weiter
+
+### Gepruefte Ausbaurichtung
+- kein Mehrmodellbetrieb im sichtbaren Produktpfad
+- kein sofortiger Modellwechsel
+- bevorzugter spaeterer Ausbau:
+  - genau ein kontrollierter Upgrade-Pfad auf ein staerkeres lokales Modell
+  - gleiche Servicegrenzen (`app_server` -> `text_service` -> `llama-server`)
+  - gleiche Bedienlogik im Basismodus
+
+### Empfohlene spaetere Upgrade-Policy
+- weiterhin genau ein aktives Produktmodell zur Laufzeit
+- optionaler Upgrade-Schritt nur, wenn:
+  - Wissensantworten produktseitig wirklich wichtiger werden
+  - Laufzeit und lokaler Speicherrahmen stabil bleiben
+- kein offener Modellschalter fuer normale Nutzer in diesem Schritt
+
+### V20 bewusst nicht umgesetzt
+- kein Modellwechsel
+- kein zusaetzlicher Modellrunner
+- kein neuer Chat-/Promptmodus
+
+## V20.1 Text-KI Im Produktschnitt 2.0
+
+### Produktfluss Nachgezogen
+- Text-KI bleibt vorne als Hauptaufgabe sichtbar.
+- Die Aktion `Als Bildprompt verwenden` arbeitet jetzt zielgerichtet fuer die allgemeinen Bildpfade:
+  - `Neues Bild erstellen`
+  - `Bild anpassen`
+  - `Bereich im Bild aendern`
+- Damit bleibt der Weg von Textantwort zu Bildstart ein klarer Ein-Klick-Flow ohne neue Prompt-Engine.
+
+### bewusst nicht Teil von V20.1
+- keine neue Textpipeline
+- keine Modellumschaltung in der UI
+- kein Mehrmodellbetrieb
+
+## V32 Chat-Modulgruppe Nachgezogene Ist-Architektur
+
+- Die produktive Text-KI bleibt im sichtbaren Produkt unveraendert:
+  - gleicher Browser-Pfad
+  - gleiche 5 Chat-Slots
+  - gleiche Modellprofile
+  - gleicher App-Server als Einstiegspunkt
+- Intern ist der Chat-Bereich in `python/` jetzt als kleine Modulgruppe sichtbar entkoppelt.
+
+### Heutige Modulgrenzen im Chat-Bereich
+
+- `python/text_chat_store.py`
+  - lokale Persistenz fuer Slots, Nachrichten und aktiven Slot
+  - SQLite-Initialisierung und Metadatenpflege
+- `python/text_chat_payloads.py`
+  - Overview-Payloads fuer Slot-Liste und aktive Chat-Uebersicht
+- `python/text_chat_requests.py`
+  - Request-Coercion, Slot-/Action-Aufloesung und Titelregeln fuer Chat-Requests
+- `python/text_chat_responses.py`
+  - finale Slot-Detail-Responses aus bereits vorbereiteten Slot- und Profilzustandsdaten
+- `python/text_chat_service_orchestration.py`
+  - chat-nahe Vorbereitung des Text-Service-Aufrufs
+  - enger Retry nach Profilwechsel
+  - Fehler-/Fallback-Mapping rund um den Chat-Request
+  - kleine Nachbereitung von Antworttext, Titel und Summary
+
+### Was in `python/app_server.py` bleibt
+
+- der einzige Browser- und HTTP-Einstiegspunkt
+- die eigentlichen Chat-Endpunkte und Handler
+- die Ablaufkoordination zwischen:
+  - Chat-Zustand
+  - Modellprofilwechsel
+  - Text-Service
+  - finaler API-Antwort
+- die produktweite Verknuepfung von Text-KI mit Bild-KI, Ergebniswelt und restlichen lokalen Diensten
+
+### Delegationsrichtung im heutigen Stand
+
+- Browser/UI
+  -> `python/app_server.py`
+  -> Chat-Teilmodule fuer Requests, Store, Payloads, Responses und Text-Service-Orchestrierung
+  -> `python/text_service.py`
+  -> lokaler Runner
+
+### Bewusst noch nicht weiter gezogen
+
+- keine vollstaendige Auslagerung der Chat-Handler aus `app_server.py`
+- keine allgemeine Text-Service-Orchestrierung ausserhalb des Chat-Pfads
+- keine Vermischung mit Bild-, Upload-, Result- oder Identity-Pfaden
+- keine neue Produktarchitektur, sondern nur sichtbarer gemachte reale Modulgrenzen
+## V33 App-Server Restkern und Teststand
+
+Der verbleibende Kern in `python/app_server.py` ist aktuell bewusst als Koordinationsgrenze belassen:
+
+- HTTP-Endpunkte und Routing
+- Laufzeitverdrahtung zwischen Chat-, Upload-, Result-, Status- und Generate-Modulen
+- Servicekopplung und servernahe Fehlerbehandlung
+
+Die aggressive Zerlegung dieses Restkerns ist fuer die aktuelle Projektphase beendet. Weitere Eingriffe sind nur noch sinnvoll, wenn spaetere Tests oder echte Produktprobleme einen klaren neuen fachlichen Schnitt erzwingen.
+
+Der Teststand umfasst inzwischen:
+
+- Modul-Unittests fuer die ausgelagerten Chat-, Upload-, Result-, Status-, Pfad- und Generate-Helfer
+- handlernahe Integrations-/Endpoint-Tests mit Mocks fuer repraesentative Endpunkte
+- lokalen Smoke-Test fuer den Stack
+- reale Live-Pruefung ueber `/health`, Text-Chat, Upload, `/generate`, Result-Export/Delete und Identity-Readiness
+
+Der aktuell sichtbare `ComfyUI_ACE-Step`-/`torchaudio`-Konflikt ist fuer den heutigen Produktkern nur ein optionaler Nebenaspekt. Solange kein ACE-Step-basierter Produktpfad verdrahtet wird, blockiert er die aktiven Text-, Standard-Bild- und Identity-Flows nicht.

@@ -39,6 +39,15 @@ IDENTITY_REFERENCE_MODE = "identity_reference"
 IDENTITY_WORKFLOW_NAME = "v6_1_instantid_single_reference_api.json"
 IDENTITY_RUNTIME_MIN_VERSION = (0, 7, 0)
 IDENTITY_RUNTIME_TIMEOUT = 45
+IDENTITY_REFERENCE_DEFAULT_STEPS = 28
+IDENTITY_REFERENCE_DEFAULT_CFG = 4.8
+IDENTITY_REFERENCE_WAIT_TIMEOUT = 300
+IDENTITY_REFERENCE_PROMPT_SUFFIX = (
+    "same person as the reference image, preserve recognizable face, same identity, same hair color, same key facial features"
+)
+IDENTITY_REFERENCE_NEGATIVE_SUFFIX = (
+    "different person, different face, different hair color, different hairstyle, identity drift, unrecognizable face"
+)
 COMFYUI_VENV_PYTHON = repo_root() / "vendor" / "ComfyUI" / "venv" / "Scripts" / "python.exe"
 IDENTITY_REQUIRED_NODES = (
     "InstantIDModelLoader",
@@ -337,14 +346,14 @@ def run_identity_reference(
     workflow: str | None = None,
     negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
     seed: int = -1,
-    steps: int = DEFAULT_STEPS,
-    cfg: float = DEFAULT_CFG,
+    steps: int = IDENTITY_REFERENCE_DEFAULT_STEPS,
+    cfg: float = IDENTITY_REFERENCE_DEFAULT_CFG,
     width: int = DEFAULT_WIDTH,
     height: int = DEFAULT_HEIGHT,
     base_url: str = DEFAULT_BASE_URL,
     timeout: int = DEFAULT_REQUEST_TIMEOUT,
     wait: bool = False,
-    wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
+    wait_timeout: int = IDENTITY_REFERENCE_WAIT_TIMEOUT,
     output_dir: Path | None = None,
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
@@ -393,10 +402,18 @@ def run_identity_reference(
     try:
         workflow_payload = load_workflow(current_workflow_path)
         staged_reference_image_name = stage_reference_image_for_comfy(reference_image_path.resolve())
+        effective_prompt = str(prompt or "").strip()
+        if effective_prompt:
+            effective_prompt = f"{effective_prompt}, {IDENTITY_REFERENCE_PROMPT_SUFFIX}"
+        effective_negative_prompt = str(negative_prompt or "").strip()
+        if effective_negative_prompt:
+            effective_negative_prompt = f"{effective_negative_prompt}, {IDENTITY_REFERENCE_NEGATIVE_SUFFIX}"
+        else:
+            effective_negative_prompt = IDENTITY_REFERENCE_NEGATIVE_SUFFIX
         queued_prompt = mutate_workflow(
             workflow=workflow_payload,
-            prompt_text=prompt,
-            negative_prompt=negative_prompt,
+            prompt_text=effective_prompt,
+            negative_prompt=effective_negative_prompt,
             seed=seed_value,
             steps=steps,
             cfg=cfg,

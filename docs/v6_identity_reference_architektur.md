@@ -767,6 +767,124 @@
   - Transfer-Maske ist im aktuellen stabilen V6.3-Pfad weiter nicht aktiv und nicht ehrlich freigebbar
   - ein sauberer Fix wuerde ueber einen groesseren Hybridpfad gehen und war fuer diesen engen V6.6-Schritt bewusst nicht zulaessig
 
+## V6.7 Separater Hybridpfad Fuer Transfer-Maske
+- stabiler Produktpfad bleibt unveraendert:
+  - `python/render_identity_transfer.py`
+  - `python/workflows/v6_3_identity_transfer_api.json`
+  - keine stille Aktivierung der Maske im bestehenden V6.3-Standardpfad
+- neuer separater Prototyp:
+  - `python/workflows/v6_3_identity_transfer_mask_hybrid_api.json`
+  - `python/render_identity_transfer_mask_hybrid.py`
+- Hybrididee:
+  - InstantID bleibt ohne direkte `mask`-Einspeisung
+  - Zielbild geht weiter ueber `LoadImage -> VAEEncode`
+  - die Transfer-Maske greift getrennt nur ueber `LoadImageMask -> SetLatentNoiseMask` in das Ziel-Latent ein
+  - Strategie: `instantid_target_body_masked_latent`
+- enger Zwischenfehler waehrend der Prototyp-Arbeit:
+  - der erste Hybridrunner teilte sich noch denselben Staging-Unterordner mit dem stabilen V6.3-Pfad
+  - dadurch konnte ein nachfolgender Basislauf die maskierte Hybriddatei aus dem ComfyUI-Input wegraeumen
+  - minimaler Fix:
+    - separater Staging-Unterordner nur fuer den Hybridpfad
+    - stabiler V6.3-Pfad bleibt davon unberuehrt
+- ehrlicher Minimalbefund:
+  - mit einer ungefuellten Konturmaske blieb der Eingriff praktisch wirkungslos
+  - mit einer sehr groben gefuellten Maske auf einem Nicht-Menschen-Ziel blieb der Hybridpfad zwar stabiler begrenzt, erzeugte aber weiter unbrauchbare Gesichtsartefakte
+- Verifikation auf drei engen Menschen-Faellen:
+  - gleicher Referenzkopf
+  - gleicher Prompt, gleicher Seed, gleicher Samplerpfad
+  - nur realistische Einzelpersonen mit sinnvoll gefuellter Kopfmaske
+  - Fall 1:
+    - Ziel: `result-20260323084219-4e40db90.png`
+    - Basis: `v6_3_transfer_123456789_00013_.png`
+    - Hybrid: `v6_3_transfer_mask_hybrid_123456789_00004_.png`
+    - Ergebnis:
+      - Basislauf veraenderte Koerper, Outfit und Gesamtszene deutlich staerker
+      - Hybridlauf hielt Koerper, Outfit und Bildaufbau sichtbar naeher am Zielbild
+  - Fall 2:
+    - Ziel: `result-20260323085038-d9cb5db7.png`
+    - Basis: `v6_3_transfer_123456789_00014_.png`
+    - Hybrid: `v6_3_transfer_mask_hybrid_123456789_00005_.png`
+    - Ergebnis:
+      - Hybridlauf begrenzte die Aenderung klarer auf den Kopfbereich
+      - das Zielportrait blieb als Gesamtbild naeher am Ursprung als im Basislauf
+  - Fall 3:
+    - Ziel: `input-20260323084915-fbde289c.png`
+    - Basis: `v6_3_transfer_123456789_00015_.png`
+    - Hybrid: `v6_3_transfer_mask_hybrid_123456789_00006_.png`
+    - Ergebnis:
+      - auch im dritten Portrait blieb der Hybridpfad stabil
+      - die sichtbare Veraenderung blieb raeumlich enger als im Basislauf
+- V6.7-Entscheidung:
+  - der separate Masken-Hybridpfad ist fuer enge Menschen-Faelle tragfaehig
+  - tragfaehig bedeutet aktuell:
+    - realistische Einzelpersonen
+    - sinnvoll gefuellte Kopfmasken
+    - kein Fantasy-/Nicht-Menschen-Ziel
+  - der Pfad bleibt bewusst getrennt vom stabilen V6.3-Produktpfad
+  - noch keine Nutzerfreigabe:
+    - Konturmasken ohne gefuellte Flaeche bringen kaum Nutzen
+    - grobe oder unpassende Masken koennen weiter dunkle Kopf-/Haarartefakte erzeugen
+    - Nicht-Menschen-/Fantasy-Ziele bleiben unruhig
+
+## V6.8 Ehrliche Freigabe Des V6.7-Masken-Hybridpfads
+- Leitentscheidung:
+  - stabiler V6.3-Standardpfad bleibt technisch unveraendert und bleibt der normale Produktweg
+  - kein stilles Ueberschreiben von `/identity-transfer/generate`
+- separater Produktzugang fuer den Spezialfall:
+  - Readiness: `GET /identity-transfer/mask-hybrid/readiness`
+  - Generate: `POST /identity-transfer/mask-hybrid/generate`
+  - Runner: `python/render_identity_transfer_mask_hybrid.py`
+- klare Trennung im Produkt:
+  - V6.3-Standardstart bleibt separat
+  - V6.8-Masken-Hybridstart ist zusaetzlich als eigener Spezial-Start sichtbar
+  - Nutzerhinweis bleibt kurz und explizit auf den engen Gueltigkeitsbereich begrenzt
+- ehrlicher Gueltigkeitsbereich:
+  - realistische Einzelpersonen
+  - sinnvoll gefuellte Kopfmasken
+  - Konturmasken allein sind in der Regel wenig wirksam
+  - Fantasy-/Nicht-Mensch-Ziele sind nicht freigegeben
+- explizit weiter nicht behauptet:
+  - keine Allgemeinfreigabe fuer alle Zieltypen
+  - keine Freigabe grober oder unpassender Masken als robusten Normalfall
+
+## V6.9 Nutzerfreundliche Absicherung Des V6.8-Masken-Hybridpfads
+- kein neuer Bildpfad:
+  - V6.3-Standard bleibt unveraendert
+  - V6.8 bleibt derselbe getrennte Masken-Hybridpfad
+- Fokus nur auf ehrliche Nutzungsfuehrung:
+  - Scope-Hinweise klarer und kuerzer
+  - V6.8-Readiness im UI mit klareren Hinweisen, was konkret fehlt
+  - bessere Fehlermeldungen fuer bekannte Blocker statt generischem "fehlgeschlagen"
+- Maskenfuehrung ohne neue Kernlogik:
+  - gefuellte Kopfmaske klar empfohlen
+  - Konturmasken als meist zu schwach klar benannt
+  - Hinweis bei unpassender Zielbild-/Maskengroesse
+- weiterhin klar nicht freigegeben:
+  - Fantasy-/Nicht-Mensch-Ziele bleiben ausserhalb des ehrlichen V6.8-Geltungsbereichs
+
+## V6.10 Qualitaets-Konstanz Zwischen V6.3 Und V6.8
+- Zielbild in diesem Schritt:
+  - kein neuer Pfad, kein Architekturumbau
+  - nur enge Qualitaetshebel fuer weniger weiche Ausreisser und stabilere Gesichtstreue pruefen
+- kleiner Vergleichssatz (nur reale Einzelpersonen):
+  - 3 enge Faelle mit fixer Aufloesung `1024x1024`, fixem Sampler `euler`, fixem Checkpoint `sdxl-base.safetensors`
+  - feste Seeds pro Fall: `20260321`, `20260322`, `20260323`
+  - jeweils V6.3-Standard und V6.8-Masken-Hybrid getrennt durchlaufen
+- getestete enge Hebel (einzeln, keine Kombinationen):
+  - `steps`: `20 -> 24`
+  - `cfg`: `6.5 -> 6.2`
+  - `denoise`: `0.65 -> 0.60`
+  - `ApplyInstantID.weight`: `0.65 -> 0.70` (nur als Laufzeittest im Benchmark, ohne Produktverdrahtung)
+  - ein kleiner Prompt/Conditioning-Hebel: geschaerfter Negativprompt gegen Weichheit
+- Ergebnis:
+  - kein Hebel zeigte ueber beide Pfade und alle engen Faelle einen stabilen Nettogewinn
+  - `denoise 0.60` reduzierte teils Weichheit, erzeugte aber deutliche Gesichtstreue-Ausreisser im Standardpfad
+  - `steps 24`, `cfg 6.2`, `weight 0.70` und der Prompt-Hebel waren fallabhaengig und nicht robust genug fuer einen neuen stabilen Default
+  - deshalb bleibt der produktive Defaultstand unveraendert (ehrliche Restgrenze statt Scheinverbesserung)
+- geschaerfte Produktlinie (ohne neue UI-Funktion):
+  - V6.3-Standard bleibt Default fuer den Normalfall und fuer moeglichst konstante Gesichtstreue
+  - V6.8-Masken-Hybrid bleibt der getrennte Spezialpfad fuer realistische Einzelpersonen mit sinnvoll gefuellter Kopfmaske, wenn die Aenderung lokal am Kopfbereich bleiben soll
+
 ## Fehlende Lokale V6.1-Bausteine
 
 ### A. Custom Nodes

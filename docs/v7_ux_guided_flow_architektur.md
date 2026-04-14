@@ -32,12 +32,10 @@
   - wie das Ergebnis erklaert wird
 
 ## Sichtbare Nutzerpfade
+- `Text schreiben / Text-KI nutzen`
 - `Neues Bild aus Prompt`
 - `Bild veraendern`
 - `Bereich im Bild aendern`
-- `Dieselbe Person in neuer Variante`
-- `Mehrere Referenzbilder nutzen`
-- `Kopf/Gesicht auf Zielbild uebertragen`
 
 ## Gepruefte Varianten
 
@@ -366,3 +364,301 @@
 - bewusst kein Ausbau in V12.2:
   - keine neue Bildpipeline
   - keine neue Produktlogik, nur sichtbare Bestaetigung des aktiven Upload-Zustands
+
+### V14.1 Bild-Veraendern-Pfad Qualitativ Nachgezogen
+- Ziel in diesem Schritt:
+  - bestehender `Bild veraendern`-Pfad ohne neue Pipeline nutzerseitig konstanter und nachvollziehbarer machen
+- enge Realfaelle (fixe Seeds, gleiches Eingabebild):
+  - Stil/Ton anpassen bei erhaltener Bildbasis (`photo_standard`)
+  - Kleidung/Farbwelt leicht verschieben bei erhaltener Pose (`photo_standard`)
+  - Stimmungswechsel als stilisierte Variante (`anime_standard`)
+- getestete Hebel (einzeln, keine Kombinations-Orgie):
+  - `denoise`: `0.30`, `0.35`, `0.40`
+  - `steps`: `20` vs `24`
+  - `cfg`: `6.5` vs `6.2`
+  - ein kleiner Negativprompt-Hebel gegen Weichheit
+- Ergebnis:
+  - `denoise 0.30` war ueber die typischen Faelle der stabilste Kompromiss aus Motivtreue, nachvollziehbarer Aenderung und ohne zusaetzliche Weichheitsausreisser
+  - `denoise 0.40`, `steps 24`, `cfg 6.2` und der kleine Negativprompt-Hebel zeigten keinen robusten Gesamtnutzen als neuer Default
+- uebernommener stabiler Stand:
+  - Basismodus `Bild veraendern` startet jetzt bewusst mit `Aenderungsstaerke 0.30`
+  - Basismodus `Bereich im Bild aendern` bleibt bei `0.35` (keine Vermischung der Pfade)
+  - kurze Nutzerhinweise machen klar: `0.30` als Start fuer konstante Ergebnisse, hoehere Werte nur bei Bedarf
+
+### V14.2 Bereich-Im-Bild-Aendern-Pfad Qualitativ Nachgezogen
+- Ziel in diesem Schritt:
+  - bestehender Inpainting-/Maskenpfad fuer normale Nutzer lokaler und konstanter machen, ohne neue Pipeline
+- enge Realfaelle (fixe Seeds, gleiches Eingabebild und gleiche Maske):
+  - lokaler Objekt-/Farbwechsel (`photo_standard`)
+  - lokaler Detailwechsel (`photo_standard`)
+  - lokaler Lichtakzent (`anime_standard`)
+- getestete Hebel (einzeln, keine Kombinations-Orgie):
+  - `denoise`: `0.33`, `0.35`, `0.38`
+  - `steps`: `20` vs `24`
+  - `cfg`: `6.5` vs `6.2`
+- Bewertung mit Maskentreue:
+  - Differenz im Maskenbereich (`inside_diff`)
+  - Differenz ausserhalb der Maske (`outside_diff`)
+  - Lokalitaetsverhaeltnis `outside_diff / inside_diff` (kleiner ist besser)
+- Ergebnis:
+  - `denoise 0.33` war der stabilste kleine Gewinn fuer lokale Bereichswirkung bei vergleichbarer Aenderungsstaerke
+  - `denoise 0.38` verschob das Verhaeltnis unguenstig (relativ mehr Drift ausserhalb)
+  - `steps 24` und `cfg 6.2` brachten keinen robusten Mehrwert gegenueber dem Baseline-Stand
+- uebernommener stabiler Stand:
+  - Basismodus `Bereich im Bild aendern` startet jetzt mit `Aenderungsstaerke 0.33`
+  - `Bild veraendern` bleibt getrennt bei `0.30` (keine Pfadvermischung)
+  - kurze Hinweise wurden nachgeschaerft: mit `0.33` starten, nur bei zu schwacher Maskenwirkung erhoehen
+
+### V14.3 Nutzersprache Fuer Allgemeine Bildprompts Nachgezogen
+- betroffene Aufgaben:
+  - `Neues Bild erstellen`
+  - `Bild veraendern`
+  - `Bereich im Bild aendern`
+- Fokus:
+  - kuerzere, praktischere Prompt-Hinweise ohne Techniksprech
+  - klarere Erwartung, wie stark der jeweilige Pfad wirkt
+  - konsistente `Foto | Anime`-Sprache ohne Checkpointbegriffe
+- real umgesetzt:
+  - `Neues Bild erstellen` fuehrt jetzt klarer ueber Motiv, Stil, Licht und Stimmung
+  - `Bild veraendern` sagt explizit: Ausgangsbild bleibt Grundlage; kleine, klare Aenderungen sind oft stabiler
+  - `Bereich im Bild aendern` sagt explizit: erst Bereich markieren, dann nur lokale Aenderung beschreiben; Restbild soll moeglichst stehenbleiben
+  - kurze Mini-Beispielrichtung wurde eingebaut (z. B. `Jacke rot`, `Licht waermer`, `Himmel als Sonnenuntergang`)
+- bewusst nicht Teil von V14.3:
+  - keine neue Produktlogik
+  - kein UI-Umbau
+  - keine Pipelineaenderung
+
+### V14.4 Expertenbereich Sprachlich Konsistenter Gezogen
+- betroffene Bereiche:
+  - `Text-Service-Test`
+  - `V6.1 Single-Reference`
+  - `V6.2 Multi-Reference`
+  - `V6.3 Transfer`
+  - `V6.8 Masken-Hybrid` (sichtbare Expertentexte)
+- Fokus:
+  - Abschnittstitel und Kurzbeschreibungen im Expertenbereich ruhiger und einheitlicher
+  - Start-/Statussprache konsistent auf `Readiness`, `starten`, `laeuft`, `bereit`, `fehlgeschlagen`
+  - Fehlertexte technisch brauchbar, aber knapper und weniger roh
+  - V6.3-Standard und V6.8-Masken-Hybrid sprachlich klar getrennt
+- bewusst nicht Teil von V14.4:
+  - keine neue Produktlogik
+  - keine neue Readiness-Logik
+  - keine Pipeline- oder Architektur-Aenderung
+
+### V15 Ergebniszentrale / Galerie / Output-Management
+- Fokus in diesem Schritt:
+  - bestehende Ergebnisanzeige als ruhigere `Ergebniszentrale` nachziehen
+  - strukturiertere Ergebniskarten mit praktischen Metadaten
+  - klarer Download plus zusaetzlicher Exportpfad
+  - Output-Struktur fuer spaeteres Cleanup vorbereiten
+- real umgesetzt:
+  - `/results` liefert jetzt neben `items` auch `total_count` und einen `storage`-Block (App-Store vs. Export-Store)
+  - Ergebniskarten zeigen Vorschaubild, Pfad/Modus, Zeit, Bildgroesse und kontextbezogene Zusatzinfos (z. B. Referenzen/Strategie)
+  - pro Ergebnis gibt es weiterhin direkten Download und zusaetzlich `In Exportordner kopieren`
+  - Export schreibt bewusst getrennt nach `data/exports` (`user_exports`) und laesst den app-verwalteten Store `data/results` unangetastet
+  - sichtbarer Speicherhinweis macht die Trennung klar:
+    - `data/results` = app-kontrolliert mit Retention
+    - `data/exports` = bewusstes Nutzer-Exportziel ohne Auto-Cleanup
+- bewusst nicht Teil von V15:
+  - keine neue Generierungspipeline
+  - keine Modell-/Promptlogik-Aenderung
+  - kein aggressiver Auto-Cleanup (nur strukturelle Vorbereitung)
+
+### V14.5 Motivtreue Zwischen Foto Und Anime Nachgezogen
+- Ziel in diesem Schritt:
+  - `Foto | Anime` als zwei Stilvarianten derselben Bildidee stabiler zusammenziehen
+  - weniger Motiv-/Kompositionsdrift bei `anime_standard` in den allgemeinen Bildpfaden
+- enger Vergleichssatz:
+  - `Neues Bild erstellen`: zwei feste Promptfaelle mit festen Seeds
+  - `Bild veraendern`: ein fester Promptfall mit festem Seed und festem Eingabebild
+- getestete Hebel (eng, einzeln kombiniert):
+  - `CFG` fuer Anime im engen Bereich (`6.0` bis `6.2`)
+  - `Steps` fuer Anime im engen Bereich (`20` bis `24`)
+  - kleiner Anime-Negativprompt-Zusatz gegen Motiv-/Kompositionschaos
+- uebernommener stabiler Stand:
+  - allgemeiner `/generate`-Pfad nutzt fuer `anime_standard` jetzt:
+    - `cfg = 6.2`
+    - `steps = 24`
+    - erweiterten Negativprompt gegen `duplicate person`, `multiple characters`, `chaotic composition`, `distorted perspective`, `cluttered background`
+  - `photo_standard` bleibt unveraendert
+  - keine neue Pipeline, keine Modellwechsel, keine UI-Logik-Erweiterung
+- ehrliche Restgrenze:
+  - Anime bleibt stilbedingt keine 1:1-Fotokopie; Ziel bleibt motivnahe Stilvariante, nicht pixelgenaue Uebereinstimmung
+
+### V15.1 Ergebniszentrale, Negativ-Prompt Und UI-Cleanup Nachgezogen
+- Ergebniszentrale/Galerie:
+  - Ergebniskarten haben jetzt zusaetzlich eine klare `Vorschau`-Aktion
+  - Klick auf Bild oder `Vorschau` oeffnet eine grosse Browser-Vorschau
+  - Download bleibt bewusst separat (`erst ansehen, dann herunterladen`)
+  - Speicherhinweis wurde auf klare Produktsprache gezogen:
+    - `Haupt-Output` in `data/results` (app-verwaltet)
+    - `Nutzer-Exporte` in `data/exports` (kein Auto-Cleanup)
+- Negativ-Prompt in allgemeinen Bildpfaden:
+  - `Neues Bild erstellen`, `Bild veraendern` und `Bereich im Bild aendern` haben jetzt ein optionales Negativ-Prompt-Feld
+  - Eingabe wird real bis `/generate` und in den Renderlauf durchgereicht (keine Fake-UI)
+  - ungueltige Eingaben werden klar abgefangen (`negative_prompt_not_string`, `negative_prompt_too_long`)
+- sichtbare UI-Dopplungen reduziert:
+  - Export-Hinweise in der Ergebniszentrale wurden entdoppelt und ruhiger formuliert
+  - Zustandsbegriffe bleiben konsistent (`Aktualisieren`, `Vorschau`, `Download`, `Export`)
+- bewusst nicht Teil von V15.1:
+  - keine neue Pipeline
+  - keine Modell-/Checkpoint-Aenderung
+  - kein aggressiver Cleanup-Automat
+
+### V15.2 Kontrollierter Cleanup-/Retention-Block
+- Ziel:
+  - `data/results` langfristig schlank und konsistent halten
+  - `data/exports` explizit unberuehrt lassen
+- real umgesetzt:
+  - bestehende Retention bleibt die ruhige Standardlogik: nur letzte `N` app-gemanagte Ergebnisse in `data/results`
+  - zusaetzlicher konservativer Housekeeping-Schritt nur fuer app-gemanagte `result-*`-Artefakte:
+    - verwaiste `result-*.json` in `data/results`
+    - verwaiste `result-*.(png|jpg|jpeg|webp)` in `data/results`
+    - alte, liegengebliebene `.result-*.tmp`-Dateien in `data/results`
+  - `/results` fuehrt Retention + Housekeeping kontrolliert aus und liefert Cleanup-Zaehler im `storage`-Block
+  - `exports_protected=true` wird explizit im Storage-Status mitgegeben
+- bewusst nicht Teil von V15.2:
+  - keine Loeschung in `data/exports`
+  - keine aggressive globale Dateisaeuberung
+  - keine neue Galerie-/Download-/Pipeline-Logik
+
+### V17 Letzter UI-/Produkt-Polierblock
+- Fokus:
+  - sichtbare Produktflaechen ruhiger und konsistenter ziehen, ohne neue Funktion
+  - Basis- und Expertenbereich als ein zusammengehoeriges Produkt wirken lassen
+- real umgesetzt:
+  - Expertenbereich-Texte auf konsistentere Kurzsprache nachgezogen (`Readiness, Start, Ergebnis`, einheitlichere Ergebnis-/Fehlerkopien)
+  - doppelte/raue Ueberblickstexte im Expertenkopf gestrafft
+  - Ergebniszentrale und `Aktuelles Ergebnis` im Expertenmodus visuell auf dieselbe Kartenlogik gezogen
+  - Ergebnisvorschau-Overlay im Expertenmodus farblich harmonisiert
+  - Status in der Ergebnisliste sprachlich geglaettet (`Ergebnisse` statt technischer Klammerform)
+- bewusst nicht Teil von V17:
+  - keine neue Bild-/Text-/Transferlogik
+  - keine neue Pipeline
+  - keine Modellanpassung
+
+### V18 Galerie-/Ergebnis-Komfort mit Wiederladen in die KI
+- Fokus:
+  - Ergebniszentrale als praktische Galerie fuer normale Nutzer weiterziehen
+  - grosse Vorschau, ruhige Navigation und direkte Wiederverwendung von Ergebnissen
+- real umgesetzt:
+  - Grossvorschau hat jetzt `Vorheriges` / `Naechstes` plus Tastatursteuerung (`Pfeil links/rechts`, `Escape`)
+  - Vorschau-Metadaten zeigen zusaetzlich die Bildposition in der Liste (`Bild X von Y`)
+  - neue Aktion `Als Eingabebild laden`:
+    - direkt in jeder Ergebniskarte
+    - zusaetzlich direkt in der Grossvorschau
+  - Wiederladen nutzt den bestehenden Input-Bild-Pfad (`/input-image`) ohne neue Pipeline oder neue Ergebniswelt
+  - im Basismodus wird nach erfolgreichem Laden bei Bedarf automatisch auf `Bild veraendern` gefuehrt
+- bewusst nicht Teil von V18:
+  - keine neue Generierungslogik
+  - keine Modell-/Checkpoint-Aenderung
+  - keine Retention-/Cleanup-Neulogik
+
+### V19 Produktlogische Neuordnung Von Basis Und Erweitert
+- Fokus:
+  - Basismodus auf klaren Kern verdichten
+  - Spezial-/Referenz-/Transferpfade klar nach hinten in `Erweitert / Experimental`
+  - Text-KI direkt mit dem Bildfluss verbinden
+- real umgesetzt:
+  - Basismodus-Taskraster zeigt nur noch:
+    - `Text schreiben / Text-KI nutzen`
+    - `Neues Bild erstellen`
+    - `Bild veraendern`
+    - `Bereich im Bild aendern`
+  - V6.1, V6.2, V6.3 und V6.8 bleiben erreichbar, aber nur im separaten `Erweitert / Experimental`-Bereich
+  - Text-KI-Antwort kann per `Als Bildprompt verwenden` direkt in `Neues Bild erstellen` uebernommen werden
+  - fuer `Bild veraendern` und `Bereich im Bild aendern` wurde der Arbeitsfluss im Basismodus geordnet: zuerst Eingabebild/Maske, danach Prompt und Start
+- bewusst nicht Teil von V19:
+  - keine neue Bild-/Text-Pipeline
+  - keine Modellaenderung
+  - keine V6-Logikneubauten
+
+### V20 Ehrliche Stilhinweise fuer Anime
+- Fokus:
+  - sichtbare Basismodus-Texte auf die bekannte Anime-Produktgrenze ausrichten
+- real umgesetzt:
+  - `Anime` wird im Basismodus klarer als freierer Stilmodus beschrieben
+  - Hinweise versprechen keine harte Motivkopie zwischen `Foto` und `Anime`
+- bewusst nicht Teil von V20:
+  - keine UI-Erweiterung
+  - keine neue Render- oder Modelllogik
+
+### V20.1 Produktschnitt 2.0 Und Text-KI-Vorbereitung
+- Fokus:
+  - Basismodus auf 5 klar benannte Hauptaufgaben ziehen
+  - Text-KI-Promptuebergabe produktiver machen
+  - `Bild anpassen` und `Neue Szene mit derselben Person` klar trennen
+- real umgesetzt:
+  - Basismodus-Taskraster zeigt jetzt:
+    - `Text schreiben / Text-KI nutzen`
+    - `Neues Bild erstellen`
+    - `Bild anpassen`
+    - `Neue Szene mit derselben Person`
+    - `Bereich im Bild aendern`
+  - `Neue Szene mit derselben Person` nutzt den bestehenden V6.1-Referenzpfad im Basismodus mit ehrlicher Scope-Sprache
+  - im Pfad `Bild anpassen` wurde die aktive Eingabebild-Vorschau direkt am Prompt-Block sichtbar gemacht (`Aktives Eingabebild`)
+  - `Als Bildprompt verwenden` aus der Text-KI uebernimmt jetzt zielgerichtet in:
+    - `Neues Bild erstellen`
+    - `Bild anpassen`
+    - `Bereich im Bild aendern`
+  - Label-/Statussprache wurde konsistent nachgezogen (`Bild anpassen`, `Neue Szene mit derselben Person`)
+- bewusst nicht Teil von V20.1:
+  - keine neue Bild-/Textpipeline
+  - keine Modellumschaltung
+  - keine neue V6-Kernlogik
+
+### V20.2 Klare Trennung Bild Anpassen vs. Neue Szene
+- Fokus:
+  - den Unterschied zwischen kleinem/mittlerem Aenderungsweg und neuem Szenenweg im Basismodus noch klarer und schneller erfassbar machen
+- real umgesetzt:
+  - `Bild anpassen`-Hinweise benennen jetzt explizit den Grenzfall:
+    - fuer neuen Bildaufbau/Pose/Szene direkt zu `Neue Szene mit derselben Person`
+  - im Basismodus gibt es in beiden Richtungen einen direkten Wechsel-CTA:
+    - aus `Bild anpassen` direkt zur Szenenaufgabe
+    - aus `Neue Szene mit derselben Person` direkt zur Anpassungsaufgabe
+  - bestehende Technikpfade bleiben unveraendert:
+    - `Bild anpassen` bleibt der allgemeine img2img-Pfad
+    - `Neue Szene mit derselben Person` bleibt auf dem bestehenden V6.1-Referenzpfad
+- bewusst nicht Teil von V20.2:
+  - keine neue Pipeline
+  - keine Modell-/Checkpoint-Aenderung
+  - keine Verschiebung von V6.2/V6.3/V6.8 in den Hauptmodus
+
+### V21 Sicherer Loeschpfad In Der Ergebniszentrale
+- Fokus:
+  - einzelne ungewuenschte Ergebnisse direkt in der Galerie entfernen, ohne Exportdateien zu riskieren
+- real umgesetzt:
+  - Loeschbutton pro Ergebniskarte und in der Grossvorschau
+  - Loeschen mit Bestaetigungsdialog und klaren Busy-/Erfolg-/Fehlerhinweisen
+  - nach erfolgreichem Loeschen wird die Ergebnisliste sofort aktualisiert; offene Vorschau auf dem geloeschten Bild wird sauber geschlossen
+  - Loeschung laeuft nur ueber `/results/delete` fuer app-gemanagte `result-*`-Eintraege aus `data/results`
+- Schutzgrenze:
+  - `data/exports` bleibt unberuehrt und hat keinen Loeschbutton
+  - keine globale `alles loeschen`-Funktion
+
+### V22 Hellerer Produktlook Ohne Logikumbau
+- Fokus:
+  - sichtbarer UI-Refresh auf hell/frisch/waermer, ohne neue Funktion
+- real umgesetzt:
+  - zentrale Farbtokens und Oberflaechen im Frontend auf helle Off-White-/Pastell-/Gruen-Akzente umgestellt
+  - Basismodus, Expertenbereich, Karten, Eingaben, Statusflaechen sowie Galerie/Preview optisch harmonisiert
+  - Delete-/Export-/Download-Aktionen bleiben funktional unveraendert
+- bewusst nicht Teil von V22:
+  - keine Produktlogik-Aenderung
+  - keine Pipeline-/Modell-Aenderung
+
+### V23 Inpainting-Pfad Fuer Lokale Bereichsaenderung Nachgeschaerft
+- Fokus:
+  - `Bereich im Bild aendern` enger auf lokale Editierung ziehen (weniger Drift ausserhalb der Maske)
+- real umgesetzt:
+  - Inpaint-Workflow lokal enger gestellt (`VAEEncodeForInpaint.grow_mask_by` von `6` auf `2`)
+  - hochgeladene/Editor-Masken werden serverseitig auf binaere Maske normalisiert (Threshold), um weiche Driftkanten zu reduzieren
+  - inpaint-spezifische Sicherheitsgrenze fuer `Aenderungsstaerke`: Backend begrenzt auf max `0.60`, UI fuehrt mit Startwert `0.30`
+  - inpaint-spezifische Prompt-/Negativprompt-Anker fuer lokalen Editcharakter ohne neue Pipeline
+  - im Basismodus ist fuer `Bereich im Bild aendern` jetzt zusaetzlich ein kurzer Personen-/Koerper-Negativprompt sichtbar vorbelegt und editierbar:
+    - `bad anatomy, bad proportions, deformed body, bad hands, extra fingers, deformed face, blurry`
+- bewusst nicht Teil von V23:
+  - keine neue Modelllogik
+  - keine neue Generierungspipeline
+  - keine Aenderung an V6-Pfaden
+  - kein neuer Block `Komplette Galerie oeffnen`; nur als spaeterer Folgepunkt vorgemerkt

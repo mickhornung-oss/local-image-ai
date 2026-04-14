@@ -68,6 +68,23 @@ function Invoke-LoggedCommand {
     }
 }
 
+function Install-OptionalRequirementsFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$PipExe,
+        [Parameter(Mandatory = $true)][string]$RequirementsPath,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-Path $RequirementsPath)) {
+        Write-Step "Skipping $Label requirements (missing: $RequirementsPath)"
+        return
+    }
+
+    Write-Step "Installing $Label requirements"
+    Invoke-LoggedCommand -FilePath $PipExe -Arguments @("install", "-r", $RequirementsPath) -WorkingDirectory $WorkingDirectory
+}
+
 function Install-ComfyUIFromZip {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -229,6 +246,12 @@ if (-not (Test-Path $clientRequirements)) {
 
 Write-Step "Installing Python client requirements"
 Invoke-LoggedCommand -FilePath $venvPip -Arguments @("install", "-r", $clientRequirements) -WorkingDirectory $repoRoot
+
+$instantIdRequirements = Join-Path $comfyRoot "custom_nodes\ComfyUI_InstantID\requirements.txt"
+$pulidRequirements = Join-Path $comfyRoot "custom_nodes\PuLID_ComfyUI\requirements.txt"
+
+Install-OptionalRequirementsFile -PipExe $venvPip -RequirementsPath $instantIdRequirements -WorkingDirectory $comfyRoot -Label "ComfyUI InstantID custom node"
+Install-OptionalRequirementsFile -PipExe $venvPip -RequirementsPath $pulidRequirements -WorkingDirectory $comfyRoot -Label "PuLID custom node"
 
 foreach ($subDir in @("models\checkpoints", "models\vae", "models\loras", "output", "input")) {
     $target = Join-Path $comfyRoot $subDir
