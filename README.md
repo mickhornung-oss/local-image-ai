@@ -2,6 +2,27 @@
 
 Lokale Windows-App fuer Text-KI und Bild-KI im selben Produkt.
 
+## ⚡ Quick Start
+
+```powershell
+# 1. Repository klonen
+git clone https://github.com/mickhornung-oss/local-image-ai.git
+cd local-image-ai
+
+# 2. Virtual Environment & Dependencies
+python -m venv .venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# 3. App starten
+python python/app_server.py
+
+# 4. Browser öffnen
+# → http://localhost:5000
+```
+
+✅ UI erscheint automatisch | Text & Bild-KI sofort einsatzbereit
+
 ## MP-04 Abschlussdokumente
 
 Verbindliche Hauptdokumente fuer den heutigen Produktstand:
