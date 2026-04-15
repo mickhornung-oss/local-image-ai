@@ -6,6 +6,14 @@
 
 Lokale Windows-App fuer Text-KI und Bild-KI im selben Produkt.
 
+## 📸 Demo
+
+**Image Generation UI:**
+
+![Local Image AI UI](images/local-image-ai-demo.png)
+
+*Wähle einen Modus (Basismodus oder Erweitert), beschreibe dein Bild-Motiv, und lass die KI generieren.*
+
 ## ⚡ Quick Start
 
 ```powershell
