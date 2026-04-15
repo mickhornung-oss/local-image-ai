@@ -1,5 +1,9 @@
 # Local Image AI
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-v1-green.svg)](https://github.com/mickhornung-oss/local-image-ai/releases)
+
 Lokale Windows-App fuer Text-KI und Bild-KI im selben Produkt.
 
 ## ⚡ Quick Start
