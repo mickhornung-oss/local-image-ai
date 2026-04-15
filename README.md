@@ -6,6 +6,12 @@
 
 Lokale Windows-App fuer Text-KI und Bild-KI im selben Produkt.
 
+## 📸 Demo
+
+![Local Image AI - Text & Image Generation](images/local-image-ai-demo.png)
+
+*Text-KI für Prompts und Umformulierung, Bild-KI für Generierung und Bearbeitung - alles in einer App.*
+
 ## ⚡ Quick Start
 
 ```powershell
