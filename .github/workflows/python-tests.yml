@@ -70,10 +70,3 @@ jobs:
       run: |
         pytest -v
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
-      if: always()
