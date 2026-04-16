@@ -24,7 +24,9 @@ class AppStatusTests(unittest.TestCase):
         self.assertIsNone(state["text_service"]["service_name"])
         self.assertIsNone(state["text_service"]["model_switch"])
 
-    def test_build_text_service_state_uses_config_fallback_when_health_unreachable(self) -> None:
+    def test_build_text_service_state_uses_config_fallback_when_health_unreachable(
+        self,
+    ) -> None:
         state = app_status.build_text_service_state(
             configured=True,
             config={
@@ -86,10 +88,14 @@ class AppStatusTests(unittest.TestCase):
         self.assertIsNone(state["text_service_error"])
         self.assertEqual(state["text_service"]["service_name"], "local-text-service")
         self.assertEqual(state["text_service"]["model_status"], "ready")
-        self.assertEqual(state["text_service"]["resolved_model_path"], "C:/models/example.gguf")
+        self.assertEqual(
+            state["text_service"]["resolved_model_path"], "C:/models/example.gguf"
+        )
         self.assertEqual(state["text_service"]["current_model_name"], "example.gguf")
 
-    def test_build_text_service_state_marks_info_unavailable_after_valid_health(self) -> None:
+    def test_build_text_service_state_marks_info_unavailable_after_valid_health(
+        self,
+    ) -> None:
         state = app_status.build_text_service_state(
             configured=True,
             config={

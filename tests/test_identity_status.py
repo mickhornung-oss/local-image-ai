@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
 import python.identity_status as identity_status
 
@@ -73,7 +73,9 @@ class IdentityStatusTests(unittest.TestCase):
             HTTPStatus.BAD_REQUEST,
         )
 
-    def test_build_identity_transfer_status_payload_builds_roles_and_blockers(self) -> None:
+    def test_build_identity_transfer_status_payload_builds_roles_and_blockers(
+        self,
+    ) -> None:
         dir_states = {
             "identity_head_reference": (True, None),
             "target_body_image": (False, "target_body_image_dir_not_accessible"),
@@ -93,14 +95,21 @@ class IdentityStatusTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertFalse(payload["v6_3_transfer_ready"])
-        self.assertEqual(payload["required_roles"], ["identity_head_reference", "target_body_image"])
+        self.assertEqual(
+            payload["required_roles"], ["identity_head_reference", "target_body_image"]
+        )
         self.assertEqual(payload["optional_roles"], ["style_reference"])
         self.assertEqual(payload["occupied_role_count"], 1)
-        self.assertEqual(payload["blockers"], ["target_body_image_dir_not_accessible", "missing_target_body_image"])
+        self.assertEqual(
+            payload["blockers"],
+            ["target_body_image_dir_not_accessible", "missing_target_body_image"],
+        )
         self.assertTrue(payload["roles"][0]["occupied"])
         self.assertFalse(payload["roles"][1]["occupied"])
 
-    def test_build_identity_transfer_status_payload_defaults_optional_roles(self) -> None:
+    def test_build_identity_transfer_status_payload_defaults_optional_roles(
+        self,
+    ) -> None:
         payload = identity_status.build_identity_transfer_status_payload(
             roles=["identity_head_reference"],
             required_roles=["identity_head_reference"],

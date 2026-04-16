@@ -46,7 +46,9 @@ def build_multi_reference_status_payload(
     }
 
 
-def find_first_free_multi_reference_slot(status_payload: Mapping[str, object] | None) -> int | None:
+def find_first_free_multi_reference_slot(
+    status_payload: Mapping[str, object] | None,
+) -> int | None:
     payload = status_payload if isinstance(status_payload, Mapping) else {}
     slots = payload.get("slots")
     if not isinstance(slots, list):
@@ -70,6 +72,8 @@ def resolve_multi_reference_readiness_http_status(
     state = readiness_state if isinstance(readiness_state, Mapping) else {}
     if state.get("ok") is True:
         return HTTPStatus.OK
-    error_type = state.get("error_type") if isinstance(state.get("error_type"), str) else None
+    error_type = (
+        state.get("error_type") if isinstance(state.get("error_type"), str) else None
+    )
     blocker = state.get("blocker") if isinstance(state.get("blocker"), str) else None
     return status_code_resolver(error_type=error_type, blocker=blocker)

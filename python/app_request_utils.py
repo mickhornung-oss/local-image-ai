@@ -24,7 +24,9 @@ def read_json_file_detail(path: Path) -> tuple[dict | None, str | None]:
     return payload, None
 
 
-def parse_results_limit(query_string: str, *, default_limit: int, max_limit: int) -> int:
+def parse_results_limit(
+    query_string: str, *, default_limit: int, max_limit: int
+) -> int:
     parsed = parse_qs(str(query_string or "").lstrip("?"), keep_blank_values=False)
     raw_value = parsed.get("limit", [str(default_limit)])[0]
     try:

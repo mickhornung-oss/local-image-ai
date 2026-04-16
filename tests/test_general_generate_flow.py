@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from http import HTTPStatus
 from pathlib import Path
-import unittest
 
 from python import general_generate_flow
 
@@ -32,10 +32,23 @@ class GeneralGenerateFlowTests(unittest.TestCase):
             normalize_negative_prompt=lambda value: (str(value).strip(), None),
             parse_boolean_flag=lambda value: bool(value),
             normalize_denoise_strength_value=lambda value, **kwargs: float(value),
-            resolve_generation_request=lambda payload, **kwargs: ("inpainting", "workflow-a", "model.safetensors"),
-            resolve_requested_input_image=lambda value: ({"image_id": value}, Path("input.png")),
-            resolve_requested_mask_image=lambda value: ({"image_id": value}, Path("mask.png")),
-            resolve_inpainting_tuning=lambda **kwargs: {"denoise_strength": 0.66, "prompt_suffix": "suffix"},
+            resolve_generation_request=lambda payload, **kwargs: (
+                "inpainting",
+                "workflow-a",
+                "model.safetensors",
+            ),
+            resolve_requested_input_image=lambda value: (
+                {"image_id": value},
+                Path("input.png"),
+            ),
+            resolve_requested_mask_image=lambda value: (
+                {"image_id": value},
+                Path("mask.png"),
+            ),
+            resolve_inpainting_tuning=lambda **kwargs: {
+                "denoise_strength": 0.66,
+                "prompt_suffix": "suffix",
+            },
         )
 
         self.assertIsNone(error)
@@ -59,8 +72,14 @@ class GeneralGenerateFlowTests(unittest.TestCase):
             normalize_negative_prompt=lambda value: (None, None),
             parse_boolean_flag=lambda value: bool(value),
             normalize_denoise_strength_value=lambda value, **kwargs: 0.35,
-            resolve_generation_request=lambda payload, **kwargs: ("img2img", "workflow-a", None),
-            resolve_requested_input_image=lambda value: (_ for _ in ()).throw(ValueError("missing_input_image")),
+            resolve_generation_request=lambda payload, **kwargs: (
+                "img2img",
+                "workflow-a",
+                None,
+            ),
+            resolve_requested_input_image=lambda value: (_ for _ in ()).throw(
+                ValueError("missing_input_image")
+            ),
             resolve_requested_mask_image=lambda value: ({}, Path("mask.png")),
             resolve_inpainting_tuning=lambda **kwargs: {},
         )
@@ -97,7 +116,11 @@ class GeneralGenerateFlowTests(unittest.TestCase):
                     "grow_mask_by": 4,
                 },
             },
-            resolve_general_generate_tuning=lambda **kwargs: (kwargs["cfg_override"], kwargs["steps_override"], kwargs["inpaint_negative_suffix"]),
+            resolve_general_generate_tuning=lambda **kwargs: (
+                kwargs["cfg_override"],
+                kwargs["steps_override"],
+                kwargs["inpaint_negative_suffix"],
+            ),
             resolve_render_prompt=lambda prompt, **kwargs: f"{prompt}::{kwargs['inpaint_prompt_suffix']}",
             inpaint_locality_negative_suffix="locality",
         )

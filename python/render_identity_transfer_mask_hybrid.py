@@ -37,10 +37,11 @@ from render_text2img import (
     validate_checkpoint_preflight,
 )
 
-
 IDENTITY_TRANSFER_MASK_HYBRID_MODE = "identity_transfer_mask_hybrid"
 IDENTITY_TRANSFER_MASK_HYBRID_STRATEGY = "instantid_target_body_masked_latent"
-IDENTITY_TRANSFER_MASK_HYBRID_WORKFLOW_NAME = "v6_3_identity_transfer_mask_hybrid_api.json"
+IDENTITY_TRANSFER_MASK_HYBRID_WORKFLOW_NAME = (
+    "v6_3_identity_transfer_mask_hybrid_api.json"
+)
 IDENTITY_TRANSFER_MASK_HYBRID_STAGING_SUBFOLDER = "identity_transfer_roles_mask_hybrid"
 IDENTITY_TRANSFER_MASK_HYBRID_REQUIRED_NODES = (
     "InstantIDModelLoader",
@@ -54,7 +55,12 @@ IDENTITY_TRANSFER_MASK_HYBRID_REQUIRED_NODES = (
 
 
 def hybrid_workflow_path() -> Path:
-    return repo_root() / "python" / "workflows" / IDENTITY_TRANSFER_MASK_HYBRID_WORKFLOW_NAME
+    return (
+        repo_root()
+        / "python"
+        / "workflows"
+        / IDENTITY_TRANSFER_MASK_HYBRID_WORKFLOW_NAME
+    )
 
 
 def build_identity_transfer_mask_hybrid_runtime_state(
@@ -74,8 +80,14 @@ def build_identity_transfer_mask_hybrid_runtime_state(
         return runtime_state
 
     current_adapter_state = runtime_state.get("adapter_state")
-    roles = current_adapter_state.get("roles") if isinstance(current_adapter_state, dict) else None
-    transfer_mask_present = isinstance(roles, dict) and isinstance(roles.get("transfer_mask"), dict)
+    roles = (
+        current_adapter_state.get("roles")
+        if isinstance(current_adapter_state, dict)
+        else None
+    )
+    transfer_mask_present = isinstance(roles, dict) and isinstance(
+        roles.get("transfer_mask"), dict
+    )
     if not transfer_mask_present:
         runtime_state.update(
             {
@@ -108,7 +120,9 @@ def stage_identity_transfer_mask_hybrid_images_for_comfy(
     if not isinstance(roles, dict):
         raise ValueError("missing_identity_head_reference")
 
-    used_roles = tuple(str(role_name) for role_name in activation_plan.get("used_roles") or ())
+    used_roles = tuple(
+        str(role_name) for role_name in activation_plan.get("used_roles") or ()
+    )
     target_dir = comfy_app_input_dir() / IDENTITY_TRANSFER_MASK_HYBRID_STAGING_SUBFOLDER
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -125,7 +139,9 @@ def stage_identity_transfer_mask_hybrid_images_for_comfy(
         shutil.copy2(source_path, temp_path)
         temp_path.replace(target_path)
         expected_names.add(target_name)
-        staged_names[role_name] = "/".join(target_path.relative_to(comfy_input_dir()).parts)
+        staged_names[role_name] = "/".join(
+            target_path.relative_to(comfy_input_dir()).parts
+        )
 
     for stale_path in target_dir.iterdir():
         if not stale_path.is_file():
@@ -203,11 +219,15 @@ def run_identity_transfer_mask_hybrid(
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    resolved_output_dir = output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    resolved_output_dir = (
+        output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    )
     seed_value = seed if seed >= 0 else random.randint(0, 2**31 - 1)
     checkpoint_path = checkpoint_inventory.resolve_requested_checkpoint(checkpoint)
 
-    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(checkpoint_path)
+    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(
+        checkpoint_path
+    )
     if checkpoint_error_type is not None:
         return {
             "status": "error",
@@ -240,7 +260,9 @@ def run_identity_transfer_mask_hybrid(
 
     try:
         workflow_payload = load_workflow(hybrid_workflow_path())
-        staged_role_images = stage_identity_transfer_mask_hybrid_images_for_comfy(effective_adapter_state, activation_plan)
+        staged_role_images = stage_identity_transfer_mask_hybrid_images_for_comfy(
+            effective_adapter_state, activation_plan
+        )
         queued_prompt = mutate_identity_transfer_mask_hybrid_workflow(
             workflow=workflow_payload,
             staged_role_images=staged_role_images,
@@ -260,7 +282,10 @@ def run_identity_transfer_mask_hybrid(
         response = client.queue_prompt(queued_prompt)
         prompt_id = response.get("prompt_id")
         if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyClientError("ComfyUI queue response did not include prompt_id.", error_type="api_error")
+            raise ComfyClientError(
+                "ComfyUI queue response did not include prompt_id.",
+                error_type="api_error",
+            )
 
         log_run_context(
             logger=logger,
@@ -280,7 +305,11 @@ def run_identity_transfer_mask_hybrid(
                 payload={"node_errors": node_errors},
                 mode="sdxl",
             )
-            return build_error_payload(mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE, prompt_id=prompt_id, error_type=error_type)
+            return build_error_payload(
+                mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                prompt_id=prompt_id,
+                error_type=error_type,
+            )
 
         extra_payload = {
             "checkpoint": checkpoint_path.name if checkpoint_path else None,
@@ -289,9 +318,15 @@ def run_identity_transfer_mask_hybrid(
             "pose_reference_used": False,
             "transfer_mask_present": True,
             "transfer_mask_used": True,
-            "identity_head_reference_image_id": str(roles["identity_head_reference"]["image_id"]),
+            "identity_head_reference_image_id": str(
+                roles["identity_head_reference"]["image_id"]
+            ),
             "target_body_image_id": str(roles["target_body_image"]["image_id"]),
-            "pose_reference_image_id": str(roles["pose_reference"]["image_id"]) if isinstance(roles.get("pose_reference"), dict) else None,
+            "pose_reference_image_id": (
+                str(roles["pose_reference"]["image_id"])
+                if isinstance(roles.get("pose_reference"), dict)
+                else None
+            ),
             "transfer_mask_image_id": str(roles["transfer_mask"]["image_id"]),
             "identity_transfer_strategy": IDENTITY_TRANSFER_MASK_HYBRID_STRATEGY,
         }
@@ -313,10 +348,18 @@ def run_identity_transfer_mask_hybrid(
                     payload=prompt_result["history"],
                     mode="sdxl",
                 )
-                return build_error_payload(mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                    prompt_id=prompt_id,
+                    error_type=error_type,
+                )
 
             output_file = prompt_result.get("output_file")
-            if not isinstance(output_file, str) or not output_file or not Path(output_file).exists():
+            if (
+                not isinstance(output_file, str)
+                or not output_file
+                or not Path(output_file).exists()
+            ):
                 return build_error_payload(
                     mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
                     prompt_id=prompt_id,
@@ -349,17 +392,42 @@ def run_identity_transfer_mask_hybrid(
             error_type = "timeout"
         if error_logger is not None:
             error_logger(f"ERROR: {error_text}")
-        return build_error_payload(mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE, prompt_id=prompt_id, error_type=error_type)
+        return build_error_payload(
+            mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+            prompt_id=prompt_id,
+            error_type=error_type,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the isolated V6.7 transfer-mask hybrid prototype via ComfyUI.")
+    parser = argparse.ArgumentParser(
+        description="Run the isolated V6.7 transfer-mask hybrid prototype via ComfyUI."
+    )
     parser.add_argument("--prompt", required=True, help="Positive prompt text.")
-    parser.add_argument("--checkpoint", help="Explicit checkpoint filename or relative path inside models/checkpoints.")
-    parser.add_argument("--seed", type=int, default=123456789, help="Fixed seed for reproducible hybrid runs.")
-    parser.add_argument("--wait", action="store_true", help="Wait for completion and emit the final result JSON.")
-    parser.add_argument("--wait-timeout", type=int, default=DEFAULT_WAIT_TIMEOUT, help="Wait timeout in seconds.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL.")
+    parser.add_argument(
+        "--checkpoint",
+        help="Explicit checkpoint filename or relative path inside models/checkpoints.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=123456789,
+        help="Fixed seed for reproducible hybrid runs.",
+    )
+    parser.add_argument(
+        "--wait",
+        action="store_true",
+        help="Wait for completion and emit the final result JSON.",
+    )
+    parser.add_argument(
+        "--wait-timeout",
+        type=int,
+        default=DEFAULT_WAIT_TIMEOUT,
+        help="Wait timeout in seconds.",
+    )
+    parser.add_argument(
+        "--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL."
+    )
     return parser
 
 

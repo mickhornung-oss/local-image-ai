@@ -37,7 +37,6 @@ from render_text2img import (
     validate_checkpoint_preflight,
 )
 
-
 IDENTITY_TRANSFER_MODE = "identity_transfer"
 IDENTITY_TRANSFER_WORKFLOW_NAME = "v6_3_identity_transfer_api.json"
 IDENTITY_TRANSFER_REQUIRED_NODES = (
@@ -74,23 +73,43 @@ def build_identity_transfer_runtime_state(
     required_nodes_override: tuple[str, ...] | None = None,
     required_models_override: dict[str, list[Path]] | None = None,
 ) -> dict[str, Any]:
-    current_adapter_state = adapter_state if isinstance(adapter_state, dict) else build_identity_transfer_adapter_state()
+    current_adapter_state = (
+        adapter_state
+        if isinstance(adapter_state, dict)
+        else build_identity_transfer_adapter_state()
+    )
     if current_adapter_state.get("ready") is not True:
         blocker = str(current_adapter_state.get("error_type") or "")
         if not blocker:
             blockers = current_adapter_state.get("blockers")
-            blocker = str(blockers[0]) if isinstance(blockers, list) and blockers else "missing_identity_head_reference"
-        error_type, normalized_blocker = resolve_identity_transfer_runtime_error(blocker)
+            blocker = (
+                str(blockers[0])
+                if isinstance(blockers, list) and blockers
+                else "missing_identity_head_reference"
+            )
+        error_type, normalized_blocker = resolve_identity_transfer_runtime_error(
+            blocker
+        )
         return {
             "ok": False,
             "error_type": error_type,
             "blocker": normalized_blocker,
             "adapter_state": current_adapter_state,
-            "required_roles_present": current_adapter_state.get("required_roles_present"),
-            "optional_roles_present": current_adapter_state.get("optional_roles_present"),
+            "required_roles_present": current_adapter_state.get(
+                "required_roles_present"
+            ),
+            "optional_roles_present": current_adapter_state.get(
+                "optional_roles_present"
+            ),
             "ordered_roles": current_adapter_state.get("ordered_roles"),
             "staging_plan": current_adapter_state.get("staging_plan"),
-            "workflow_path": str((workflow_path_override.resolve() if workflow_path_override is not None else workflow_path())),
+            "workflow_path": str(
+                (
+                    workflow_path_override.resolve()
+                    if workflow_path_override is not None
+                    else workflow_path()
+                )
+            ),
             "insightface_version": None,
             "runtime_error": None,
             "missing_nodes": [],
@@ -100,20 +119,34 @@ def build_identity_transfer_runtime_state(
     runtime_state = build_identity_runtime_state(
         base_url=base_url,
         timeout=timeout,
-        workflow_path_override=workflow_path_override.resolve() if workflow_path_override is not None else workflow_path(),
-        required_nodes_override=required_nodes_override if required_nodes_override is not None else IDENTITY_TRANSFER_REQUIRED_NODES,
+        workflow_path_override=(
+            workflow_path_override.resolve()
+            if workflow_path_override is not None
+            else workflow_path()
+        ),
+        required_nodes_override=(
+            required_nodes_override
+            if required_nodes_override is not None
+            else IDENTITY_TRANSFER_REQUIRED_NODES
+        ),
         required_models_override=required_models_override,
     )
     runtime_state["adapter_state"] = current_adapter_state
-    runtime_state["required_roles_present"] = current_adapter_state.get("required_roles_present")
-    runtime_state["optional_roles_present"] = current_adapter_state.get("optional_roles_present")
+    runtime_state["required_roles_present"] = current_adapter_state.get(
+        "required_roles_present"
+    )
+    runtime_state["optional_roles_present"] = current_adapter_state.get(
+        "optional_roles_present"
+    )
     runtime_state["ordered_roles"] = current_adapter_state.get("ordered_roles")
     runtime_state["staging_plan"] = current_adapter_state.get("staging_plan")
     return runtime_state
 
 
 def build_identity_transfer_activation_plan(roles: dict[str, Any]) -> dict[str, Any]:
-    pose_reference_record = roles.get("pose_reference") if isinstance(roles, dict) else None
+    pose_reference_record = (
+        roles.get("pose_reference") if isinstance(roles, dict) else None
+    )
     pose_reference_used = isinstance(pose_reference_record, dict)
     used_roles = ["identity_head_reference", "target_body_image"]
     if pose_reference_used:
@@ -125,7 +158,9 @@ def build_identity_transfer_activation_plan(roles: dict[str, Any]) -> dict[str, 
     }
 
 
-def stage_identity_transfer_images_for_comfy(adapter_state: dict[str, Any], activation_plan: dict[str, Any]) -> dict[str, str]:
+def stage_identity_transfer_images_for_comfy(
+    adapter_state: dict[str, Any], activation_plan: dict[str, Any]
+) -> dict[str, str]:
     roles = adapter_state.get("roles")
     if not isinstance(roles, dict):
         raise ValueError("missing_identity_head_reference")
@@ -138,7 +173,11 @@ def stage_identity_transfer_images_for_comfy(adapter_state: dict[str, Any], acti
     if not isinstance(target_record, dict):
         raise ValueError("missing_target_body_image")
 
-    used_roles = tuple(str(role_name) for role_name in activation_plan.get("used_roles") or ("identity_head_reference", "target_body_image"))
+    used_roles = tuple(
+        str(role_name)
+        for role_name in activation_plan.get("used_roles")
+        or ("identity_head_reference", "target_body_image")
+    )
     target_dir = comfy_app_input_dir() / IDENTITY_TRANSFER_STAGING_SUBFOLDER
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -153,7 +192,9 @@ def stage_identity_transfer_images_for_comfy(adapter_state: dict[str, Any], acti
         shutil.copy2(source_path, temp_path)
         temp_path.replace(target_path)
         expected_names.add(target_name)
-        staged_names[role_name] = "/".join(target_path.relative_to(comfy_input_dir()).parts)
+        staged_names[role_name] = "/".join(
+            target_path.relative_to(comfy_input_dir()).parts
+        )
 
     for stale_path in target_dir.iterdir():
         if not stale_path.is_file():
@@ -205,7 +246,10 @@ def mutate_identity_transfer_workflow(
     mutated["20"]["inputs"]["image"] = staged_role_images["target_body_image"]
     mutated["3"]["inputs"]["latent_image"] = ["21", 0]
 
-    if activation_plan.get("pose_reference_used") is True and "pose_reference" in staged_role_images:
+    if (
+        activation_plan.get("pose_reference_used") is True
+        and "pose_reference" in staged_role_images
+    ):
         mutated["22"] = {
             "inputs": {
                 "image": staged_role_images["pose_reference"],
@@ -245,12 +289,16 @@ def run_identity_transfer(
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    resolved_output_dir = output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    resolved_output_dir = (
+        output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    )
     seed_value = seed if seed >= 0 else random.randint(0, 2**31 - 1)
     prompt_id: str | None = None
     checkpoint_path = checkpoint_inventory.resolve_requested_checkpoint(checkpoint)
 
-    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(checkpoint_path)
+    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(
+        checkpoint_path
+    )
     if checkpoint_error_type is not None:
         return {
             "status": "error",
@@ -281,7 +329,9 @@ def run_identity_transfer(
     activation_plan = build_identity_transfer_activation_plan(roles)
     try:
         workflow_payload = load_workflow(workflow_path())
-        staged_role_images = stage_identity_transfer_images_for_comfy(effective_adapter_state, activation_plan)
+        staged_role_images = stage_identity_transfer_images_for_comfy(
+            effective_adapter_state, activation_plan
+        )
         queued_prompt = mutate_identity_transfer_workflow(
             workflow=workflow_payload,
             staged_role_images=staged_role_images,
@@ -302,7 +352,10 @@ def run_identity_transfer(
         response = client.queue_prompt(queued_prompt)
         prompt_id = response.get("prompt_id")
         if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyClientError("ComfyUI queue response did not include prompt_id.", error_type="api_error")
+            raise ComfyClientError(
+                "ComfyUI queue response did not include prompt_id.",
+                error_type="api_error",
+            )
 
         log_run_context(
             logger=logger,
@@ -322,7 +375,9 @@ def run_identity_transfer(
                 payload={"node_errors": node_errors},
                 mode="sdxl",
             )
-            return build_error_payload(mode=IDENTITY_TRANSFER_MODE, prompt_id=prompt_id, error_type=error_type)
+            return build_error_payload(
+                mode=IDENTITY_TRANSFER_MODE, prompt_id=prompt_id, error_type=error_type
+            )
 
         pose_reference_present = isinstance(roles.get("pose_reference"), dict)
         transfer_mask_present = isinstance(roles.get("transfer_mask"), dict)
@@ -333,10 +388,20 @@ def run_identity_transfer(
             "pose_reference_used": activation_plan["pose_reference_used"],
             "transfer_mask_present": transfer_mask_present,
             "transfer_mask_used": activation_plan["transfer_mask_used"],
-            "identity_head_reference_image_id": str(roles["identity_head_reference"]["image_id"]),
+            "identity_head_reference_image_id": str(
+                roles["identity_head_reference"]["image_id"]
+            ),
             "target_body_image_id": str(roles["target_body_image"]["image_id"]),
-            "pose_reference_image_id": str(roles["pose_reference"]["image_id"]) if pose_reference_present else None,
-            "transfer_mask_image_id": str(roles["transfer_mask"]["image_id"]) if transfer_mask_present else None,
+            "pose_reference_image_id": (
+                str(roles["pose_reference"]["image_id"])
+                if pose_reference_present
+                else None
+            ),
+            "transfer_mask_image_id": (
+                str(roles["transfer_mask"]["image_id"])
+                if transfer_mask_present
+                else None
+            ),
             "identity_transfer_strategy": IDENTITY_TRANSFER_STRATEGY,
         }
 
@@ -357,10 +422,18 @@ def run_identity_transfer(
                     payload=prompt_result["history"],
                     mode="sdxl",
                 )
-                return build_error_payload(mode=IDENTITY_TRANSFER_MODE, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=IDENTITY_TRANSFER_MODE,
+                    prompt_id=prompt_id,
+                    error_type=error_type,
+                )
 
             output_file = prompt_result.get("output_file")
-            if not isinstance(output_file, str) or not output_file or not Path(output_file).exists():
+            if (
+                not isinstance(output_file, str)
+                or not output_file
+                or not Path(output_file).exists()
+            ):
                 return build_error_payload(
                     mode=IDENTITY_TRANSFER_MODE,
                     prompt_id=prompt_id,
@@ -393,16 +466,34 @@ def run_identity_transfer(
             error_type = "timeout"
         if error_logger is not None:
             error_logger(f"ERROR: {error_text}")
-        return build_error_payload(mode=IDENTITY_TRANSFER_MODE, prompt_id=prompt_id, error_type=error_type)
+        return build_error_payload(
+            mode=IDENTITY_TRANSFER_MODE, prompt_id=prompt_id, error_type=error_type
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the isolated V6.3.3 identity-transfer workflow via ComfyUI.")
+    parser = argparse.ArgumentParser(
+        description="Run the isolated V6.3.3 identity-transfer workflow via ComfyUI."
+    )
     parser.add_argument("--prompt", required=True, help="Positive prompt text.")
-    parser.add_argument("--checkpoint", help="Explicit checkpoint filename or relative path inside models/checkpoints.")
-    parser.add_argument("--wait", action="store_true", help="Wait for completion and emit the final result JSON.")
-    parser.add_argument("--wait-timeout", type=int, default=DEFAULT_WAIT_TIMEOUT, help="Wait timeout in seconds.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL.")
+    parser.add_argument(
+        "--checkpoint",
+        help="Explicit checkpoint filename or relative path inside models/checkpoints.",
+    )
+    parser.add_argument(
+        "--wait",
+        action="store_true",
+        help="Wait for completion and emit the final result JSON.",
+    )
+    parser.add_argument(
+        "--wait-timeout",
+        type=int,
+        default=DEFAULT_WAIT_TIMEOUT,
+        help="Wait timeout in seconds.",
+    )
+    parser.add_argument(
+        "--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL."
+    )
     return parser
 
 

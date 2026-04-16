@@ -30,8 +30,7 @@ def text_chat_connection(db_path: Path) -> sqlite3.Connection:
 
 def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
     with text_chat_connection(db_path) as connection:
-        connection.execute(
-            """
+        connection.execute("""
             CREATE TABLE IF NOT EXISTS text_chat_slots (
                 slot_index INTEGER PRIMARY KEY,
                 title TEXT,
@@ -42,10 +41,8 @@ def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
                 created_at TEXT,
                 updated_at TEXT
             )
-            """
-        )
-        connection.execute(
-            """
+            """)
+        connection.execute("""
             CREATE TABLE IF NOT EXISTS text_chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 slot_index INTEGER NOT NULL,
@@ -53,16 +50,13 @@ def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
-            """
-        )
-        connection.execute(
-            """
+            """)
+        connection.execute("""
             CREATE TABLE IF NOT EXISTS text_chat_state (
                 state_key TEXT PRIMARY KEY,
                 state_value TEXT NOT NULL
             )
-            """
-        )
+            """)
         for slot_index in range(1, slot_count + 1):
             connection.execute(
                 """
@@ -72,18 +66,20 @@ def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
                 """,
                 (slot_index,),
             )
-        connection.execute(
-            """
+        connection.execute("""
             INSERT OR IGNORE INTO text_chat_state (state_key, state_value)
             VALUES ('active_slot_index', '1')
-            """
-        )
+            """)
         slot_columns = {
             str(row["name"]).strip().lower()
-            for row in connection.execute("PRAGMA table_info(text_chat_slots)").fetchall()
+            for row in connection.execute(
+                "PRAGMA table_info(text_chat_slots)"
+            ).fetchall()
         }
         if "model_profile" not in slot_columns:
-            connection.execute("ALTER TABLE text_chat_slots ADD COLUMN model_profile TEXT")
+            connection.execute(
+                "ALTER TABLE text_chat_slots ADD COLUMN model_profile TEXT"
+            )
 
 
 def normalize_text_chat_slot_index(value: object, *, slot_count: int) -> int:
@@ -96,7 +92,9 @@ def normalize_text_chat_slot_index(value: object, *, slot_count: int) -> int:
     return slot_index
 
 
-def normalize_text_chat_title(value: object, *, max_length: int) -> tuple[str | None, str | None]:
+def normalize_text_chat_title(
+    value: object, *, max_length: int
+) -> tuple[str | None, str | None]:
     if value is None:
         return None, None
     if not isinstance(value, str):
@@ -124,8 +122,29 @@ def infer_text_chat_language_from_text(value: str) -> str:
     sample = f" {str(value or '').lower()} "
     german_score = 0
     english_score = 0
-    german_tokens = (" der ", " die ", " das ", " und ", " nicht ", " bitte ", " fuer ", " fÃ¼r ", " mit ", " ich ")
-    english_tokens = (" the ", " and ", " please ", " with ", " this ", " that ", " write ", " prompt ", " image ")
+    german_tokens = (
+        " der ",
+        " die ",
+        " das ",
+        " und ",
+        " nicht ",
+        " bitte ",
+        " fuer ",
+        " fÃ¼r ",
+        " mit ",
+        " ich ",
+    )
+    english_tokens = (
+        " the ",
+        " and ",
+        " please ",
+        " with ",
+        " this ",
+        " that ",
+        " write ",
+        " prompt ",
+        " image ",
+    )
     if re.search(r"[Ã¤Ã¶Ã¼ÃŸ]", sample):
         german_score += 2
     german_score += sum(1 for token in german_tokens if token in sample)
@@ -147,7 +166,9 @@ def get_active_text_chat_slot_index(db_path: Path, *, slot_count: int) -> int:
         return 1
 
 
-def set_active_text_chat_slot_index(db_path: Path, slot_index: int, *, slot_count: int) -> None:
+def set_active_text_chat_slot_index(
+    db_path: Path, slot_index: int, *, slot_count: int
+) -> None:
     ensure_text_chat_store(db_path, slot_count=slot_count)
     with text_chat_connection(db_path) as connection:
         connection.execute(
@@ -268,7 +289,9 @@ def update_text_chat_slot_metadata(
 def clear_text_chat_slot(db_path: Path, slot_index: int, *, slot_count: int) -> None:
     ensure_text_chat_store(db_path, slot_count=slot_count)
     with text_chat_connection(db_path) as connection:
-        connection.execute("DELETE FROM text_chat_messages WHERE slot_index = ?", (slot_index,))
+        connection.execute(
+            "DELETE FROM text_chat_messages WHERE slot_index = ?", (slot_index,)
+        )
         connection.execute(
             """
             UPDATE text_chat_slots
@@ -359,21 +382,78 @@ def get_text_chat_slot(
         slot_count=slot_count,
         limit=visible_messages_limit,
     )
-    occupied = bool(slot_row and isinstance(slot_row["updated_at"], str) and str(slot_row["updated_at"]).strip())
+    occupied = bool(
+        slot_row
+        and isinstance(slot_row["updated_at"], str)
+        and str(slot_row["updated_at"]).strip()
+    )
     last_assistant_message = next(
-        (message["content"] for message in reversed(messages) if message["role"] == "assistant" and message["content"].strip()),
+        (
+            message["content"]
+            for message in reversed(messages)
+            if message["role"] == "assistant" and message["content"].strip()
+        ),
         None,
     )
     return {
         "slot_index": slot_index,
         "occupied": occupied,
-        "title": str(slot_row["title"]).strip() if occupied and slot_row and isinstance(slot_row["title"], str) and str(slot_row["title"]).strip() else build_default_text_chat_title(slot_index),
-        "summary": str(slot_row["summary"]).strip() if occupied and slot_row and isinstance(slot_row["summary"], str) and str(slot_row["summary"]).strip() else None,
-        "language": str(slot_row["language"]).strip() if occupied and slot_row and isinstance(slot_row["language"], str) and str(slot_row["language"]).strip() else None,
-        "model_profile": str(slot_row["model_profile"]).strip() if occupied and slot_row and isinstance(slot_row["model_profile"], str) and str(slot_row["model_profile"]).strip() else default_model_profile,
-        "model": str(slot_row["model"]).strip() if occupied and slot_row and isinstance(slot_row["model"], str) and str(slot_row["model"]).strip() else None,
-        "created_at": str(slot_row["created_at"]).strip() if occupied and slot_row and isinstance(slot_row["created_at"], str) and str(slot_row["created_at"]).strip() else None,
-        "updated_at": str(slot_row["updated_at"]).strip() if occupied and slot_row and isinstance(slot_row["updated_at"], str) and str(slot_row["updated_at"]).strip() else None,
+        "title": (
+            str(slot_row["title"]).strip()
+            if occupied
+            and slot_row
+            and isinstance(slot_row["title"], str)
+            and str(slot_row["title"]).strip()
+            else build_default_text_chat_title(slot_index)
+        ),
+        "summary": (
+            str(slot_row["summary"]).strip()
+            if occupied
+            and slot_row
+            and isinstance(slot_row["summary"], str)
+            and str(slot_row["summary"]).strip()
+            else None
+        ),
+        "language": (
+            str(slot_row["language"]).strip()
+            if occupied
+            and slot_row
+            and isinstance(slot_row["language"], str)
+            and str(slot_row["language"]).strip()
+            else None
+        ),
+        "model_profile": (
+            str(slot_row["model_profile"]).strip()
+            if occupied
+            and slot_row
+            and isinstance(slot_row["model_profile"], str)
+            and str(slot_row["model_profile"]).strip()
+            else default_model_profile
+        ),
+        "model": (
+            str(slot_row["model"]).strip()
+            if occupied
+            and slot_row
+            and isinstance(slot_row["model"], str)
+            and str(slot_row["model"]).strip()
+            else None
+        ),
+        "created_at": (
+            str(slot_row["created_at"]).strip()
+            if occupied
+            and slot_row
+            and isinstance(slot_row["created_at"], str)
+            and str(slot_row["created_at"]).strip()
+            else None
+        ),
+        "updated_at": (
+            str(slot_row["updated_at"]).strip()
+            if occupied
+            and slot_row
+            and isinstance(slot_row["updated_at"], str)
+            and str(slot_row["updated_at"]).strip()
+            else None
+        ),
         "message_count": len(messages),
         "messages": messages,
         "last_assistant_message": last_assistant_message,
@@ -409,7 +489,11 @@ def list_text_chat_slots(
                 "created_at": slot["created_at"],
                 "updated_at": slot["updated_at"],
                 "message_count": slot["message_count"],
-                "last_message_preview": excerpt_text(slot["last_assistant_message"] or "", limit=100) if slot["last_assistant_message"] else None,
+                "last_message_preview": (
+                    excerpt_text(slot["last_assistant_message"] or "", limit=100)
+                    if slot["last_assistant_message"]
+                    else None
+                ),
             }
         )
     return slots

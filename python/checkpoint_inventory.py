@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 CHECKPOINT_EXTENSIONS = {".safetensors", ".ckpt"}
 DEFAULT_PRODUCT_CHECKPOINT_NAME = "sdxl-base.safetensors"
 PHOTO_STANDARD_MODE = "photo_standard"
@@ -50,7 +49,8 @@ def list_checkpoint_files(*, include_invalid: bool = False) -> list[Path]:
     paths = [
         path.resolve()
         for path in root.iterdir()
-        if path.is_file() and (include_invalid or path.suffix.lower() in CHECKPOINT_EXTENSIONS)
+        if path.is_file()
+        and (include_invalid or path.suffix.lower() in CHECKPOINT_EXTENSIONS)
     ]
     return sorted(paths, key=lambda item: (item.name.lower(), item.name))
 
@@ -101,7 +101,9 @@ def build_checkpoint_inventory() -> dict[str, Any]:
     return {
         "status": "ok",
         "count": len(candidates),
-        "sdxl_count": sum(1 for candidate in candidates if candidate["is_sdxl_candidate"]),
+        "sdxl_count": sum(
+            1 for candidate in candidates if candidate["is_sdxl_candidate"]
+        ),
         "selected": selected.name if selected else None,
         "fallback_checkpoint": DEFAULT_PRODUCT_CHECKPOINT_NAME,
         "standard_modes": build_standard_checkpoint_modes(paths),
@@ -153,7 +155,13 @@ def main() -> int:
         print(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
         return 0
     except OSError as exc:
-        print(json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=True, separators=(",", ":")))
+        print(
+            json.dumps(
+                {"status": "error", "reason": str(exc)},
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+        )
         return 1
 
 

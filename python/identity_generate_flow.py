@@ -12,7 +12,9 @@ def _error(http_status: HTTPStatus, *, error_type: str, blocker: str) -> dict:
     }
 
 
-def coerce_identity_generate_payload(payload: object) -> tuple[dict | None, dict | None]:
+def coerce_identity_generate_payload(
+    payload: object,
+) -> tuple[dict | None, dict | None]:
     if not isinstance(payload, dict):
         return None, _error(
             HTTPStatus.BAD_REQUEST,
@@ -22,7 +24,9 @@ def coerce_identity_generate_payload(payload: object) -> tuple[dict | None, dict
     return payload, None
 
 
-def normalize_identity_prompt_and_checkpoint(payload: Mapping[str, object]) -> tuple[dict | None, dict | None]:
+def normalize_identity_prompt_and_checkpoint(
+    payload: Mapping[str, object],
+) -> tuple[dict | None, dict | None]:
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         return None, _error(
@@ -52,7 +56,9 @@ def prepare_identity_reference_request(
     if normalize_error is not None or normalized is None:
         return None, normalize_error
     try:
-        reference_image_payload, reference_image_path = resolve_reference_image(payload_dict.get("reference_image_id"))
+        reference_image_payload, reference_image_path = resolve_reference_image(
+            payload_dict.get("reference_image_id")
+        )
     except ValueError as exc:
         return None, _error(
             HTTPStatus.BAD_REQUEST,
@@ -87,7 +93,9 @@ def prepare_identity_research_request(
             blocker=negative_prompt_error,
         )
     provider_value = payload.get("provider") if isinstance(payload, Mapping) else None
-    provider = str(provider_value or default_provider).strip().lower() or default_provider
+    provider = (
+        str(provider_value or default_provider).strip().lower() or default_provider
+    )
     normalized["negative_prompt"] = negative_prompt
     normalized["provider"] = provider
     return normalized, None
@@ -111,10 +119,16 @@ def build_runtime_preflight_failure(
     )
 
 
-def build_system_preflight_failure(system_state: Mapping[str, object] | None) -> dict | None:
+def build_system_preflight_failure(
+    system_state: Mapping[str, object] | None,
+) -> dict | None:
     state = system_state if isinstance(system_state, Mapping) else {}
     if state.get("comfyui_reachable") is not True:
-        blocker = "runner_state_invalid" if state.get("runner_error") == "runner_state_invalid" else "comfyui_unreachable"
+        blocker = (
+            "runner_state_invalid"
+            if state.get("runner_error") == "runner_state_invalid"
+            else "comfyui_unreachable"
+        )
         return _error(
             HTTPStatus.SERVICE_UNAVAILABLE,
             error_type="api_error",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
 from python import generate_endpoint_flow
 
@@ -45,8 +45,14 @@ class GenerateEndpointFlowTests(unittest.TestCase):
 
         status, payload = generate_endpoint_flow.execute_generate_endpoint(
             render_callable=lambda: calls.append("render") or {"status": "ok"},
-            finalize_callable=lambda result: (calls.append("finalize") or HTTPStatus.OK, {"status": result["status"]}),
-            server_error_callable=lambda: (calls.append("server_error") or HTTPStatus.INTERNAL_SERVER_ERROR, {"status": "error"}),
+            finalize_callable=lambda result: (
+                calls.append("finalize") or HTTPStatus.OK,
+                {"status": result["status"]},
+            ),
+            server_error_callable=lambda: (
+                calls.append("server_error") or HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"status": "error"},
+            ),
             finish_render=lambda: calls.append("finish"),
         )
 
@@ -63,8 +69,14 @@ class GenerateEndpointFlowTests(unittest.TestCase):
 
         status, payload = generate_endpoint_flow.execute_generate_endpoint(
             render_callable=render_callable,
-            finalize_callable=lambda result: (calls.append("finalize") or HTTPStatus.OK, {"status": "ok"}),
-            server_error_callable=lambda: (calls.append("server_error") or HTTPStatus.INTERNAL_SERVER_ERROR, {"status": "error"}),
+            finalize_callable=lambda result: (
+                calls.append("finalize") or HTTPStatus.OK,
+                {"status": "ok"},
+            ),
+            server_error_callable=lambda: (
+                calls.append("server_error") or HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"status": "error"},
+            ),
             finish_render=lambda: calls.append("finish"),
         )
 

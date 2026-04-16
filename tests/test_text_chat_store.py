@@ -23,7 +23,9 @@ class TextChatStoreTests(unittest.TestCase):
 
         self.assertTrue(self.db_path.is_file())
         self.assertEqual(
-            text_chat_store.get_active_text_chat_slot_index(self.db_path, slot_count=self.slot_count),
+            text_chat_store.get_active_text_chat_slot_index(
+                self.db_path, slot_count=self.slot_count
+            ),
             1,
         )
 
@@ -38,17 +40,25 @@ class TextChatStoreTests(unittest.TestCase):
 
     def test_slot_index_and_title_normalization(self) -> None:
         self.assertEqual(
-            text_chat_store.normalize_text_chat_slot_index(" 2 ", slot_count=self.slot_count),
+            text_chat_store.normalize_text_chat_slot_index(
+                " 2 ", slot_count=self.slot_count
+            ),
             2,
         )
         with self.assertRaises(ValueError):
-            text_chat_store.normalize_text_chat_slot_index("0", slot_count=self.slot_count)
+            text_chat_store.normalize_text_chat_slot_index(
+                "0", slot_count=self.slot_count
+            )
 
-        normalized, error = text_chat_store.normalize_text_chat_title("  Hello   world  ", max_length=10)
+        normalized, error = text_chat_store.normalize_text_chat_title(
+            "  Hello   world  ", max_length=10
+        )
         self.assertEqual(normalized, "Hello worl")
         self.assertIsNone(error)
 
-        normalized, error = text_chat_store.normalize_text_chat_title("   ", max_length=10)
+        normalized, error = text_chat_store.normalize_text_chat_title(
+            "   ", max_length=10
+        )
         self.assertIsNone(normalized)
         self.assertEqual(error, "empty_text_chat_title")
 
@@ -67,7 +77,9 @@ class TextChatStoreTests(unittest.TestCase):
         self.assertEqual(created["slot_index"], 2)
         self.assertEqual(created["title"], "Projektplanung")
         self.assertEqual(
-            text_chat_store.get_active_text_chat_slot_index(self.db_path, slot_count=self.slot_count),
+            text_chat_store.get_active_text_chat_slot_index(
+                self.db_path, slot_count=self.slot_count
+            ),
             2,
         )
 
@@ -97,7 +109,9 @@ class TextChatStoreTests(unittest.TestCase):
         )
         self.assertEqual(slot["message_count"], 2)
         self.assertEqual(slot["messages"][0]["role"], "user")
-        self.assertEqual(slot["last_assistant_message"], "Hier ist die Zusammenfassung.")
+        self.assertEqual(
+            slot["last_assistant_message"], "Hier ist die Zusammenfassung."
+        )
 
     def test_create_in_first_empty_slot_uses_first_free_slot(self) -> None:
         text_chat_store.create_text_chat_in_slot(
@@ -145,7 +159,9 @@ class TextChatStoreTests(unittest.TestCase):
             now_iso="2026-04-04T10:00:05Z",
         )
 
-        text_chat_store.clear_text_chat_slot(self.db_path, 3, slot_count=self.slot_count)
+        text_chat_store.clear_text_chat_slot(
+            self.db_path, 3, slot_count=self.slot_count
+        )
 
         slot = text_chat_store.get_text_chat_slot(
             self.db_path,
@@ -158,7 +174,9 @@ class TextChatStoreTests(unittest.TestCase):
         self.assertEqual(slot["message_count"], 0)
         self.assertEqual(slot["title"], "Chat 3")
 
-    def test_summary_returns_none_for_short_history_and_text_for_longer_history(self) -> None:
+    def test_summary_returns_none_for_short_history_and_text_for_longer_history(
+        self,
+    ) -> None:
         short_summary = text_chat_store.build_text_chat_summary(
             [{"role": "user", "content": "Hallo"}],
             recent_messages_count=6,

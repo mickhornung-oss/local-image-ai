@@ -5,11 +5,12 @@ import random
 from pathlib import Path
 from typing import Any, Callable
 
+import checkpoint_inventory
 import requests
 from comfy_client import ComfyClient, ComfyClientError
 from render_identity_reference import (
-    validate_reference_image_preflight,
     stage_reference_image_for_comfy,
+    validate_reference_image_preflight,
 )
 from render_text2img import (
     DEFAULT_BASE_URL,
@@ -32,17 +33,11 @@ from render_text2img import (
     repo_root,
     validate_checkpoint_preflight,
 )
-import checkpoint_inventory
-
 
 PULID_V11_PROVIDER = "pulid_v11"
 PULID_V11_WORKFLOW_NAME = "v6_4_pulid_v11_single_reference_api.json"
-PULID_V11_PROMPT_SUFFIX = (
-    "same person as the reference image, preserve the same facial identity, preserve hairstyle and core facial structure"
-)
-PULID_V11_NEGATIVE_SUFFIX = (
-    "different person, different face, different hairstyle, identity drift, unrecognizable face"
-)
+PULID_V11_PROMPT_SUFFIX = "same person as the reference image, preserve the same facial identity, preserve hairstyle and core facial structure"
+PULID_V11_NEGATIVE_SUFFIX = "different person, different face, different hairstyle, identity drift, unrecognizable face"
 PULID_V11_REQUIRED_NODE_TOKENS = ("pulid",)
 PULID_V11_CUSTOM_NODE_DIR_CANDIDATES = (
     repo_root() / "vendor" / "ComfyUI" / "custom_nodes" / "PuLID_ComfyUI",
@@ -78,7 +73,11 @@ def build_pulid_v11_runtime_state(
     timeout: int = DEFAULT_REQUEST_TIMEOUT,
     workflow_path_override: Path | None = None,
 ) -> dict[str, Any]:
-    current_workflow_path = workflow_path_override.resolve() if workflow_path_override is not None else workflow_path()
+    current_workflow_path = (
+        workflow_path_override.resolve()
+        if workflow_path_override is not None
+        else workflow_path()
+    )
     custom_node_dir = _detect_custom_node_dir()
     model_dir = _detect_model_dir()
 
@@ -89,7 +88,9 @@ def build_pulid_v11_runtime_state(
         "provider": PULID_V11_PROVIDER,
         "workflow_path": str(current_workflow_path),
         "workflow_name": current_workflow_path.name,
-        "custom_node_dir": str(custom_node_dir) if custom_node_dir is not None else None,
+        "custom_node_dir": (
+            str(custom_node_dir) if custom_node_dir is not None else None
+        ),
         "model_dir": str(model_dir) if model_dir is not None else None,
         "detected_nodes": [],
         "experimental": True,
@@ -136,7 +137,8 @@ def build_pulid_v11_runtime_state(
     detected_nodes = sorted(
         node_name
         for node_name in payload.keys()
-        if isinstance(node_name, str) and any(token in node_name.lower() for token in PULID_V11_REQUIRED_NODE_TOKENS)
+        if isinstance(node_name, str)
+        and any(token in node_name.lower() for token in PULID_V11_REQUIRED_NODE_TOKENS)
     )
     base_payload["detected_nodes"] = detected_nodes
     if not detected_nodes:
@@ -169,13 +171,17 @@ def run_pulid_v11_identity_research(
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    resolved_output_dir = output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    resolved_output_dir = (
+        output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    )
     seed_value = seed if seed >= 0 else random.randint(0, 2**31 - 1)
     prompt_id: str | None = None
     checkpoint_path = checkpoint_inventory.resolve_requested_checkpoint(checkpoint)
     current_workflow_path = Path(workflow).resolve() if workflow else workflow_path()
 
-    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(checkpoint_path)
+    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(
+        checkpoint_path
+    )
     if checkpoint_error_type is not None:
         return {
             "status": "error",
@@ -220,13 +226,17 @@ def run_pulid_v11_identity_research(
 
     try:
         workflow_payload = load_workflow(current_workflow_path)
-        staged_reference_image_name = stage_reference_image_for_comfy(reference_image_path.resolve())
+        staged_reference_image_name = stage_reference_image_for_comfy(
+            reference_image_path.resolve()
+        )
         effective_prompt = str(prompt or "").strip()
         if effective_prompt:
             effective_prompt = f"{effective_prompt}, {PULID_V11_PROMPT_SUFFIX}"
         effective_negative_prompt = str(negative_prompt or "").strip()
         if effective_negative_prompt:
-            effective_negative_prompt = f"{effective_negative_prompt}, {PULID_V11_NEGATIVE_SUFFIX}"
+            effective_negative_prompt = (
+                f"{effective_negative_prompt}, {PULID_V11_NEGATIVE_SUFFIX}"
+            )
         else:
             effective_negative_prompt = PULID_V11_NEGATIVE_SUFFIX
 
@@ -248,7 +258,10 @@ def run_pulid_v11_identity_research(
         response = client.queue_prompt(queued_prompt)
         prompt_id = response.get("prompt_id")
         if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyClientError("ComfyUI queue response did not include prompt_id.", error_type="api_error")
+            raise ComfyClientError(
+                "ComfyUI queue response did not include prompt_id.",
+                error_type="api_error",
+            )
 
         log_run_context(
             logger=logger,
@@ -268,7 +281,9 @@ def run_pulid_v11_identity_research(
                 payload={"node_errors": node_errors},
                 mode="sdxl",
             )
-            return build_error_payload(mode=PULID_V11_PROVIDER, prompt_id=prompt_id, error_type=error_type)
+            return build_error_payload(
+                mode=PULID_V11_PROVIDER, prompt_id=prompt_id, error_type=error_type
+            )
 
         if wait:
             prompt_result = client.wait_for_prompt_result(
@@ -287,10 +302,16 @@ def run_pulid_v11_identity_research(
                     payload=prompt_result["history"],
                     mode="sdxl",
                 )
-                return build_error_payload(mode=PULID_V11_PROVIDER, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=PULID_V11_PROVIDER, prompt_id=prompt_id, error_type=error_type
+                )
 
             output_file = prompt_result.get("output_file")
-            if not isinstance(output_file, str) or not output_file or not Path(output_file).exists():
+            if (
+                not isinstance(output_file, str)
+                or not output_file
+                or not Path(output_file).exists()
+            ):
                 return build_error_payload(
                     mode=PULID_V11_PROVIDER,
                     prompt_id=prompt_id,
@@ -327,4 +348,6 @@ def run_pulid_v11_identity_research(
             error_type = "timeout"
         if error_logger is not None:
             error_logger(f"ERROR: {error_text}")
-        return build_error_payload(mode=PULID_V11_PROVIDER, prompt_id=prompt_id, error_type=error_type)
+        return build_error_payload(
+            mode=PULID_V11_PROVIDER, prompt_id=prompt_id, error_type=error_type
+        )

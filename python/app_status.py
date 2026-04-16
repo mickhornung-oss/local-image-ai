@@ -16,7 +16,9 @@ def build_text_service_state(
     info_error: str | None,
 ) -> dict:
     config_data = config if isinstance(config, Mapping) else {}
-    switch_state = dict(model_switch_state) if isinstance(model_switch_state, Mapping) else None
+    switch_state = (
+        dict(model_switch_state) if isinstance(model_switch_state, Mapping) else None
+    )
     state = {
         "text_service_configured": configured,
         "text_service_reachable": False,
@@ -43,7 +45,11 @@ def build_text_service_state(
         return state
 
     if health_error is not None or not isinstance(health_payload, Mapping):
-        state["text_service_error"] = "unreachable" if health_error in {"unreachable", "timeout"} else "invalid_health"
+        state["text_service_error"] = (
+            "unreachable"
+            if health_error in {"unreachable", "timeout"}
+            else "invalid_health"
+        )
         state["text_service"]["service_name"] = config_data.get("service_name")
         state["text_service"]["runner_type"] = config_data.get("runner_type")
         state["text_service"]["model_status"] = config_data.get("model_status")
@@ -57,7 +63,11 @@ def build_text_service_state(
         return state
 
     expected_service_name = config_data.get("service_name")
-    if isinstance(expected_service_name, str) and expected_service_name.strip() and service_name.strip() != expected_service_name:
+    if (
+        isinstance(expected_service_name, str)
+        and expected_service_name.strip()
+        and service_name.strip() != expected_service_name
+    ):
         state["text_service_error"] = "unexpected_service"
         return state
 
@@ -65,42 +75,104 @@ def build_text_service_state(
     state["text_service_error"] = None
     state["text_service"] = {
         "service_name": service_name.strip(),
-        "service_mode": health_payload.get("service_mode") if isinstance(health_payload.get("service_mode"), str) else None,
-        "runner_type": health_payload.get("runner_type") if isinstance(health_payload.get("runner_type"), str) else config_data.get("runner_type"),
-        "runner_present": health_payload.get("runner_present") if isinstance(health_payload.get("runner_present"), bool) else None,
-        "runner_reachable": health_payload.get("runner_reachable") if isinstance(health_payload.get("runner_reachable"), bool) else None,
-        "runner_startable": health_payload.get("runner_startable") if isinstance(health_payload.get("runner_startable"), bool) else None,
+        "service_mode": (
+            health_payload.get("service_mode")
+            if isinstance(health_payload.get("service_mode"), str)
+            else None
+        ),
+        "runner_type": (
+            health_payload.get("runner_type")
+            if isinstance(health_payload.get("runner_type"), str)
+            else config_data.get("runner_type")
+        ),
+        "runner_present": (
+            health_payload.get("runner_present")
+            if isinstance(health_payload.get("runner_present"), bool)
+            else None
+        ),
+        "runner_reachable": (
+            health_payload.get("runner_reachable")
+            if isinstance(health_payload.get("runner_reachable"), bool)
+            else None
+        ),
+        "runner_startable": (
+            health_payload.get("runner_startable")
+            if isinstance(health_payload.get("runner_startable"), bool)
+            else None
+        ),
         "stub_mode": health_payload.get("stub_mode") is True,
-        "inference_available": health_payload.get("inference_available") if isinstance(health_payload.get("inference_available"), bool) else None,
-        "model_status": health_payload.get("model_status") if isinstance(health_payload.get("model_status"), str) else config_data.get("model_status"),
-        "model_configured": health_payload.get("model_configured") if isinstance(health_payload.get("model_configured"), bool) else config_data.get("model_configured"),
-        "model_present": health_payload.get("model_present") if isinstance(health_payload.get("model_present"), bool) else None,
+        "inference_available": (
+            health_payload.get("inference_available")
+            if isinstance(health_payload.get("inference_available"), bool)
+            else None
+        ),
+        "model_status": (
+            health_payload.get("model_status")
+            if isinstance(health_payload.get("model_status"), str)
+            else config_data.get("model_status")
+        ),
+        "model_configured": (
+            health_payload.get("model_configured")
+            if isinstance(health_payload.get("model_configured"), bool)
+            else config_data.get("model_configured")
+        ),
+        "model_present": (
+            health_payload.get("model_present")
+            if isinstance(health_payload.get("model_present"), bool)
+            else None
+        ),
         "resolved_model_path": None,
         "current_model_name": None,
         "model_switch": switch_state,
     }
 
     if info_error is None and isinstance(info_payload, Mapping):
-        if isinstance(info_payload.get("service_mode"), str) and str(info_payload.get("service_mode")).strip():
-            state["text_service"]["service_mode"] = str(info_payload.get("service_mode")).strip()
-        if isinstance(info_payload.get("runner_type"), str) and str(info_payload.get("runner_type")).strip():
-            state["text_service"]["runner_type"] = str(info_payload.get("runner_type")).strip()
+        if (
+            isinstance(info_payload.get("service_mode"), str)
+            and str(info_payload.get("service_mode")).strip()
+        ):
+            state["text_service"]["service_mode"] = str(
+                info_payload.get("service_mode")
+            ).strip()
+        if (
+            isinstance(info_payload.get("runner_type"), str)
+            and str(info_payload.get("runner_type")).strip()
+        ):
+            state["text_service"]["runner_type"] = str(
+                info_payload.get("runner_type")
+            ).strip()
         if isinstance(info_payload.get("runner_present"), bool):
             state["text_service"]["runner_present"] = info_payload.get("runner_present")
         if isinstance(info_payload.get("runner_reachable"), bool):
-            state["text_service"]["runner_reachable"] = info_payload.get("runner_reachable")
+            state["text_service"]["runner_reachable"] = info_payload.get(
+                "runner_reachable"
+            )
         if isinstance(info_payload.get("runner_startable"), bool):
-            state["text_service"]["runner_startable"] = info_payload.get("runner_startable")
+            state["text_service"]["runner_startable"] = info_payload.get(
+                "runner_startable"
+            )
         state["text_service"]["stub_mode"] = info_payload.get("stub_mode") is True
         if isinstance(info_payload.get("inference_available"), bool):
-            state["text_service"]["inference_available"] = info_payload.get("inference_available")
-        if isinstance(info_payload.get("model_status"), str) and str(info_payload.get("model_status")).strip():
-            state["text_service"]["model_status"] = str(info_payload.get("model_status")).strip()
+            state["text_service"]["inference_available"] = info_payload.get(
+                "inference_available"
+            )
+        if (
+            isinstance(info_payload.get("model_status"), str)
+            and str(info_payload.get("model_status")).strip()
+        ):
+            state["text_service"]["model_status"] = str(
+                info_payload.get("model_status")
+            ).strip()
         if isinstance(info_payload.get("model_configured"), bool):
-            state["text_service"]["model_configured"] = info_payload.get("model_configured")
+            state["text_service"]["model_configured"] = info_payload.get(
+                "model_configured"
+            )
         if isinstance(info_payload.get("model_present"), bool):
             state["text_service"]["model_present"] = info_payload.get("model_present")
-        if isinstance(info_payload.get("resolved_model_path"), str) and str(info_payload.get("resolved_model_path")).strip():
+        if (
+            isinstance(info_payload.get("resolved_model_path"), str)
+            and str(info_payload.get("resolved_model_path")).strip()
+        ):
             resolved_model_path = str(info_payload.get("resolved_model_path")).strip()
             state["text_service"]["resolved_model_path"] = resolved_model_path
             state["text_service"]["current_model_name"] = Path(resolved_model_path).name

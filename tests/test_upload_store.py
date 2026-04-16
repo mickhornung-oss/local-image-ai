@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import unittest
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from PIL import Image
 
 from python import upload_store
 from python.image_input_validation import UploadRequestError
-
 
 VALID_UPLOAD_EXTENSIONS = frozenset({".png"})
 VALID_UPLOAD_FORMATS = {"PNG": ("png", "image/png")}
@@ -41,8 +40,12 @@ class UploadStoreTests(unittest.TestCase):
         }
 
         basic = upload_store.build_upload_success_response(payload)
-        multi_reference = upload_store.build_multi_reference_upload_success_response(payload)
-        identity_transfer = upload_store.build_identity_transfer_upload_success_response(payload)
+        multi_reference = upload_store.build_multi_reference_upload_success_response(
+            payload
+        )
+        identity_transfer = (
+            upload_store.build_identity_transfer_upload_success_response(payload)
+        )
 
         self.assertEqual("ok", basic["status"])
         self.assertTrue(basic["ok"])
@@ -96,15 +99,27 @@ class UploadStoreTests(unittest.TestCase):
 
             upload_store.write_input_metadata(
                 first,
-                {"original_name": "a.png", "slot_index": 0, "created_at": "2026-04-06T10:00:00Z"},
+                {
+                    "original_name": "a.png",
+                    "slot_index": 0,
+                    "created_at": "2026-04-06T10:00:00Z",
+                },
             )
             upload_store.write_input_metadata(
                 second,
-                {"original_name": "b.png", "slot_index": 0, "created_at": "2026-04-06T11:00:00Z"},
+                {
+                    "original_name": "b.png",
+                    "slot_index": 0,
+                    "created_at": "2026-04-06T11:00:00Z",
+                },
             )
             upload_store.write_input_metadata(
                 third,
-                {"original_name": "c.png", "slot_index": 1, "created_at": "2026-04-06T09:00:00Z"},
+                {
+                    "original_name": "c.png",
+                    "slot_index": 1,
+                    "created_at": "2026-04-06T09:00:00Z",
+                },
             )
 
             items = upload_store.list_stored_multi_reference_images(
@@ -267,8 +282,12 @@ class UploadStoreTests(unittest.TestCase):
                     make_png_bytes(size=(8, 6)),
                     {"width": 8, "height": 6},
                 ),
-                clear_stored_mask_images=lambda: cleared.__setitem__("mask", cleared["mask"] + 1),
-                clear_stored_input_images=lambda: cleared.__setitem__("input", cleared["input"] + 1),
+                clear_stored_mask_images=lambda: cleared.__setitem__(
+                    "mask", cleared["mask"] + 1
+                ),
+                clear_stored_input_images=lambda: cleared.__setitem__(
+                    "input", cleared["input"] + 1
+                ),
                 describe_stored_mask_image=lambda path: upload_store.describe_stored_mask_image(
                     path,
                     valid_upload_extensions=VALID_UPLOAD_EXTENSIONS,

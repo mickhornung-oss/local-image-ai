@@ -5,7 +5,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = REPO_ROOT / "config"
 CONFIG_PATH = CONFIG_DIR / "app_config.json"
@@ -44,7 +43,9 @@ def _resolve_model_path(config_payload: dict) -> str:
 
     candidate_paths = [
         REPO_ROOT / "models" / "qwen2.5-7b-instruct-q4_k_m.gguf",
-        Path(r"C:\Users\mickh\Desktop\Py Mick\vendor\text_models\qwen2.5-7b-instruct-q4_k_m.gguf"),
+        Path(
+            r"C:\Users\mickh\Desktop\Py Mick\vendor\text_models\qwen2.5-7b-instruct-q4_k_m.gguf"
+        ),
     ]
     for candidate in candidate_paths:
         if candidate.exists() and candidate.is_file():

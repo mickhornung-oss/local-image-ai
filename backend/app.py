@@ -7,7 +7,6 @@ from backend.model_runtime import ModelRuntime
 from backend.schemas import AssistRequest
 from backend.service import run_assist
 
-
 CONFIG = load_config()
 RUNTIME = ModelRuntime(CONFIG)
 app = FastAPI(title="Code KI", version="1.0.0")

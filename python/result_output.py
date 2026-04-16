@@ -65,7 +65,9 @@ def inspect_result_image(
 
 def write_result_metadata(path: Path, metadata: dict) -> None:
     temp_path = path.with_name(f".{path.name}.tmp")
-    temp_path.write_text(json.dumps(metadata, ensure_ascii=True, separators=(",", ":")), encoding="utf-8")
+    temp_path.write_text(
+        json.dumps(metadata, ensure_ascii=True, separators=(",", ":")), encoding="utf-8"
+    )
     temp_path.replace(path)
 
 
@@ -154,13 +156,16 @@ def build_result_metadata_item(
         image_info = inspect_result_image(candidate)
     except ResultStoreError:
         return None
-    effective_limit = retention_limit if retention_limit >= 1 else default_retention_limit
+    effective_limit = (
+        retention_limit if retention_limit >= 1 else default_retention_limit
+    )
     return {
         "result_id": result_id,
         "created_at": created_at,
         "mode": str(metadata_payload.get("mode") or "txt2img").strip() or "txt2img",
         "prompt": str(metadata_payload.get("prompt") or "").strip(),
-        "negative_prompt": str(metadata_payload.get("negative_prompt") or "").strip() or None,
+        "negative_prompt": str(metadata_payload.get("negative_prompt") or "").strip()
+        or None,
         "checkpoint": str(metadata_payload.get("checkpoint") or "").strip() or None,
         "width": image_info["width"],
         "height": image_info["height"],
@@ -169,30 +174,103 @@ def build_result_metadata_item(
         "size_bytes": image_info["size_bytes"],
         "preview_url": preview_url_builder(candidate),
         "download_url": download_url_builder(result_id),
-        "reference_count": metadata_payload.get("reference_count") if isinstance(metadata_payload.get("reference_count"), int) else None,
-        "reference_slots": metadata_payload.get("reference_slots") if isinstance(metadata_payload.get("reference_slots"), list) else None,
-        "reference_image_ids": metadata_payload.get("reference_image_ids") if isinstance(metadata_payload.get("reference_image_ids"), list) else None,
+        "reference_count": (
+            metadata_payload.get("reference_count")
+            if isinstance(metadata_payload.get("reference_count"), int)
+            else None
+        ),
+        "reference_slots": (
+            metadata_payload.get("reference_slots")
+            if isinstance(metadata_payload.get("reference_slots"), list)
+            else None
+        ),
+        "reference_image_ids": (
+            metadata_payload.get("reference_image_ids")
+            if isinstance(metadata_payload.get("reference_image_ids"), list)
+            else None
+        ),
         "provider": str(metadata_payload.get("provider") or "").strip() or None,
-        "identity_research_provider": str(metadata_payload.get("identity_research_provider") or "").strip() or None,
-        "identity_research_workflow": str(metadata_payload.get("identity_research_workflow") or "").strip() or None,
-        "identity_research_reference_image_id": str(metadata_payload.get("identity_research_reference_image_id") or "").strip() or None,
-        "identity_research_reference_file_name": str(metadata_payload.get("identity_research_reference_file_name") or "").strip() or None,
-        "experimental": metadata_payload.get("experimental") if isinstance(metadata_payload.get("experimental"), bool) else None,
-        "multi_reference_strategy": str(metadata_payload.get("multi_reference_strategy") or "").strip() or None,
-        "used_roles": metadata_payload.get("used_roles") if isinstance(metadata_payload.get("used_roles"), list) else None,
-        "pose_reference_present": metadata_payload.get("pose_reference_present") if isinstance(metadata_payload.get("pose_reference_present"), bool) else None,
-        "pose_reference_used": metadata_payload.get("pose_reference_used") if isinstance(metadata_payload.get("pose_reference_used"), bool) else None,
-        "transfer_mask_present": metadata_payload.get("transfer_mask_present") if isinstance(metadata_payload.get("transfer_mask_present"), bool) else None,
-        "transfer_mask_used": metadata_payload.get("transfer_mask_used") if isinstance(metadata_payload.get("transfer_mask_used"), bool) else None,
-        "identity_head_reference_image_id": str(metadata_payload.get("identity_head_reference_image_id") or "").strip() or None,
-        "target_body_image_id": str(metadata_payload.get("target_body_image_id") or "").strip() or None,
-        "pose_reference_image_id": str(metadata_payload.get("pose_reference_image_id") or "").strip() or None,
-        "transfer_mask_image_id": str(metadata_payload.get("transfer_mask_image_id") or "").strip() or None,
-        "identity_transfer_strategy": str(metadata_payload.get("identity_transfer_strategy") or "").strip() or None,
-        "store_scope": str(metadata_payload.get("store_scope") or "app_results").strip() or "app_results",
-        "cleanup_policy": str(metadata_payload.get("cleanup_policy") or "retention_limit").strip() or "retention_limit",
+        "identity_research_provider": str(
+            metadata_payload.get("identity_research_provider") or ""
+        ).strip()
+        or None,
+        "identity_research_workflow": str(
+            metadata_payload.get("identity_research_workflow") or ""
+        ).strip()
+        or None,
+        "identity_research_reference_image_id": str(
+            metadata_payload.get("identity_research_reference_image_id") or ""
+        ).strip()
+        or None,
+        "identity_research_reference_file_name": str(
+            metadata_payload.get("identity_research_reference_file_name") or ""
+        ).strip()
+        or None,
+        "experimental": (
+            metadata_payload.get("experimental")
+            if isinstance(metadata_payload.get("experimental"), bool)
+            else None
+        ),
+        "multi_reference_strategy": str(
+            metadata_payload.get("multi_reference_strategy") or ""
+        ).strip()
+        or None,
+        "used_roles": (
+            metadata_payload.get("used_roles")
+            if isinstance(metadata_payload.get("used_roles"), list)
+            else None
+        ),
+        "pose_reference_present": (
+            metadata_payload.get("pose_reference_present")
+            if isinstance(metadata_payload.get("pose_reference_present"), bool)
+            else None
+        ),
+        "pose_reference_used": (
+            metadata_payload.get("pose_reference_used")
+            if isinstance(metadata_payload.get("pose_reference_used"), bool)
+            else None
+        ),
+        "transfer_mask_present": (
+            metadata_payload.get("transfer_mask_present")
+            if isinstance(metadata_payload.get("transfer_mask_present"), bool)
+            else None
+        ),
+        "transfer_mask_used": (
+            metadata_payload.get("transfer_mask_used")
+            if isinstance(metadata_payload.get("transfer_mask_used"), bool)
+            else None
+        ),
+        "identity_head_reference_image_id": str(
+            metadata_payload.get("identity_head_reference_image_id") or ""
+        ).strip()
+        or None,
+        "target_body_image_id": str(
+            metadata_payload.get("target_body_image_id") or ""
+        ).strip()
+        or None,
+        "pose_reference_image_id": str(
+            metadata_payload.get("pose_reference_image_id") or ""
+        ).strip()
+        or None,
+        "transfer_mask_image_id": str(
+            metadata_payload.get("transfer_mask_image_id") or ""
+        ).strip()
+        or None,
+        "identity_transfer_strategy": str(
+            metadata_payload.get("identity_transfer_strategy") or ""
+        ).strip()
+        or None,
+        "store_scope": str(metadata_payload.get("store_scope") or "app_results").strip()
+        or "app_results",
+        "cleanup_policy": str(
+            metadata_payload.get("cleanup_policy") or "retention_limit"
+        ).strip()
+        or "retention_limit",
         "retention_limit": effective_limit,
-        "source_output_file": str(metadata_payload.get("source_output_file") or "").strip() or None,
+        "source_output_file": str(
+            metadata_payload.get("source_output_file") or ""
+        ).strip()
+        or None,
     }
 
 
@@ -295,7 +373,9 @@ def cleanup_result_store_housekeeping(
                 removed_stale_temp += 1
         except OSError as exc:
             if error_logger is not None:
-                error_logger(f"[result-cleanup] failed to remove {candidate.name}: {exc}")
+                error_logger(
+                    f"[result-cleanup] failed to remove {candidate.name}: {exc}"
+                )
 
     return {
         "orphan_metadata_removed": removed_orphan_metadata,
@@ -313,7 +393,9 @@ def enforce_result_retention(
     cleanup_result_store_housekeeping: Callable[[set[str]], dict],
     error_logger: Callable[[str], None] | None = None,
 ) -> dict:
-    effective_limit = retain_count if retain_count is not None else default_retention_limit
+    effective_limit = (
+        retain_count if retain_count is not None else default_retention_limit
+    )
     if effective_limit < 1:
         effective_limit = default_retention_limit
 
@@ -329,7 +411,9 @@ def enforce_result_retention(
                 target_path.unlink(missing_ok=True)
             except OSError as exc:
                 if error_logger is not None:
-                    error_logger(f"[result-retention] failed to remove {target_path.name}: {exc}")
+                    error_logger(
+                        f"[result-retention] failed to remove {target_path.name}: {exc}"
+                    )
         if removed_any:
             removed_stale_results += 1
 
@@ -358,7 +442,9 @@ def capture_generated_result(
     use_inpainting: bool,
     extra_metadata: dict | None,
     results_dir_access_state: Callable[[], tuple[bool, str | None]],
-    resolve_internal_output_path: Callable[[str | Path | None], tuple[Path | None, str | None]],
+    resolve_internal_output_path: Callable[
+        [str | Path | None], tuple[Path | None, str | None]
+    ],
     is_accessible_output_file: Callable[[Path], bool],
     inspect_result_image: Callable[[Path], dict],
     result_root: Path,
@@ -471,7 +557,11 @@ def list_stored_results(
 ) -> list[dict]:
     result_root.mkdir(parents=True, exist_ok=True)
     metadata_paths = sorted(
-        (path for path in result_root.iterdir() if path.is_file() and path.suffix.lower() == ".json"),
+        (
+            path
+            for path in result_root.iterdir()
+            if path.is_file() and path.suffix.lower() == ".json"
+        ),
         reverse=True,
     )
 
@@ -560,7 +650,10 @@ def reserve_export_target_path(base_file_name: str, *, export_root: Path) -> Pat
     try:
         candidate.relative_to(export_root)
     except ValueError:
-        candidate = (export_root / f"export-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.png").resolve()
+        candidate = (
+            export_root
+            / f"export-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.png"
+        ).resolve()
 
     if not candidate.exists():
         return candidate
@@ -619,7 +712,9 @@ def build_results_storage_summary(
         "results_scope": "app_results_managed",
         "results_dir": results_dir,
         "results_count": max(0, int(app_results_count)),
-        "retention_limit": retention_limit if retention_limit >= 1 else default_retention_limit,
+        "retention_limit": (
+            retention_limit if retention_limit >= 1 else default_retention_limit
+        ),
         "cleanup_scope": "results_only_managed",
         "stale_results_removed": cleanup_count("stale_results_removed"),
         "orphan_metadata_removed": cleanup_count("orphan_metadata_removed"),
@@ -647,7 +742,11 @@ def create_result_export(
     utc_now_iso: Callable[[], str],
 ) -> dict:
     normalized_result_id = str(result_id or "").strip()
-    if not normalized_result_id or normalized_result_id in {".", ".."} or Path(normalized_result_id).name != normalized_result_id:
+    if (
+        not normalized_result_id
+        or normalized_result_id in {".", ".."}
+        or Path(normalized_result_id).name != normalized_result_id
+    ):
         raise ResultStoreError(
             status_code=HTTPStatus.BAD_REQUEST,
             error_type="invalid_request",
@@ -762,7 +861,9 @@ def delete_stored_result(
             message="Result could not be found.",
         )
 
-    store_scope = str(result_item.get("store_scope") or "").strip().lower() or "app_results"
+    store_scope = (
+        str(result_item.get("store_scope") or "").strip().lower() or "app_results"
+    )
     if store_scope != "app_results":
         raise ResultStoreError(
             status_code=HTTPStatus.FORBIDDEN,
@@ -867,7 +968,9 @@ def finalize_generate_result(
     return HTTPStatus.OK, response_payload
 
 
-def build_results_list_response(*, count: int, total_count: int, limit: int, items: list[dict], storage: dict) -> dict:
+def build_results_list_response(
+    *, count: int, total_count: int, limit: int, items: list[dict], storage: dict
+) -> dict:
     return {
         "status": "ok",
         "count": count,

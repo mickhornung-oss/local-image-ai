@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
 import python.multi_reference_status as multi_reference_status
 
@@ -25,7 +25,9 @@ class MultiReferenceStatusTests(unittest.TestCase):
         self.assertEqual(payload["slots"][1]["slot_index"], 2)
         self.assertFalse(payload["slots"][1]["occupied"])
 
-    def test_build_status_payload_filters_invalid_items_and_defaults_to_not_ready(self) -> None:
+    def test_build_status_payload_filters_invalid_items_and_defaults_to_not_ready(
+        self,
+    ) -> None:
         payload = multi_reference_status.build_multi_reference_status_payload(
             [
                 {"slot_index": "invalid", "image_id": "img-a"},
@@ -62,7 +64,11 @@ class MultiReferenceStatusTests(unittest.TestCase):
         )
         self.assertEqual(
             multi_reference_status.resolve_multi_reference_readiness_http_status(
-                {"ok": False, "error_type": "invalid_request", "blocker": "insufficient_multi_reference_images"},
+                {
+                    "ok": False,
+                    "error_type": "invalid_request",
+                    "blocker": "insufficient_multi_reference_images",
+                },
                 status_code_resolver=lambda **kwargs: HTTPStatus.CONFLICT,
             ),
             HTTPStatus.CONFLICT,

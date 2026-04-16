@@ -9,7 +9,9 @@ from backend.prompting import build_messages
 from backend.schemas import AssistRequest
 
 
-def run_assist(request: AssistRequest, *, config: AppConfig, runtime: ModelRuntime) -> dict:
+def run_assist(
+    request: AssistRequest, *, config: AppConfig, runtime: ModelRuntime
+) -> dict:
     user_prompt, context_summary = build_user_prompt(request, config)
     messages = build_messages(request, user_prompt)
     started_at = time.perf_counter()

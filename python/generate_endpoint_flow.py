@@ -16,7 +16,9 @@ def build_generate_endpoint_error(
 ) -> tuple[HTTPStatus, dict]:
     payload = failure if isinstance(failure, Mapping) else {}
     http_status = payload.get("http_status")
-    resolved_http_status = http_status if isinstance(http_status, HTTPStatus) else fallback_http_status
+    resolved_http_status = (
+        http_status if isinstance(http_status, HTTPStatus) else fallback_http_status
+    )
     resolved_error_type = str(payload.get("error_type") or fallback_error_type)
     resolved_blocker = str(payload.get("blocker") or fallback_blocker)
     return (

@@ -47,7 +47,8 @@ def build_text_chat_active_chat_payload(
         "title": _optional_text(data.get("title")) or default_title,
         "summary": _optional_text(data.get("summary")),
         "language": _optional_text(data.get("language")),
-        "model_profile": _optional_text(data.get("model_profile")) or default_model_profile,
+        "model_profile": _optional_text(data.get("model_profile"))
+        or default_model_profile,
         "model": _optional_text(data.get("model")),
         "created_at": _optional_text(data.get("created_at")),
         "updated_at": _optional_text(data.get("updated_at")),
@@ -69,14 +70,19 @@ def build_text_chat_slot_overview_payload(
     preview = _optional_text(data.get("last_message_preview"))
     if preview is None:
         last_assistant_message = _optional_text(data.get("last_assistant_message"))
-        preview = _excerpt_text(last_assistant_message or "", limit=preview_limit) if last_assistant_message else None
+        preview = (
+            _excerpt_text(last_assistant_message or "", limit=preview_limit)
+            if last_assistant_message
+            else None
+        )
     return {
         "slot_index": slot_index,
         "occupied": bool(data.get("occupied") is True),
         "title": _optional_text(data.get("title")) or default_title,
         "summary": _optional_text(data.get("summary")),
         "language": _optional_text(data.get("language")),
-        "model_profile": _optional_text(data.get("model_profile")) or default_model_profile,
+        "model_profile": _optional_text(data.get("model_profile"))
+        or default_model_profile,
         "model": _optional_text(data.get("model")),
         "created_at": _optional_text(data.get("created_at")),
         "updated_at": _optional_text(data.get("updated_at")),

@@ -40,7 +40,11 @@ def finalize_identity_generate_outcome(
             mode=mode,
             error_type=error_type,
             blocker=blocker,
-            prompt_id=payload.get("prompt_id") if isinstance(payload.get("prompt_id"), str) else None,
+            prompt_id=(
+                payload.get("prompt_id")
+                if isinstance(payload.get("prompt_id"), str)
+                else None
+            ),
             request_id=request_id,
         ),
     )

@@ -71,8 +71,11 @@ class TextServiceConfigTests(unittest.TestCase):
         runtime_state = {"runner_host": "127.0.0.1", "runner_port": 8092}
         messages = [{"role": "user", "content": "Bitte schreibe einen laengeren Text."}]
 
-        with patch.object(text_service, "estimate_message_token_usage", return_value=1700), \
-             patch.object(text_service.urllib_request, "urlopen", side_effect=fake_urlopen):
+        with patch.object(
+            text_service, "estimate_message_token_usage", return_value=1700
+        ), patch.object(
+            text_service.urllib_request, "urlopen", side_effect=fake_urlopen
+        ):
             response = text_service.request_runner_response(
                 runtime_state,
                 messages,
@@ -82,7 +85,9 @@ class TextServiceConfigTests(unittest.TestCase):
         self.assertEqual(response, "Antworttext")
         self.assertEqual(captured_payload["max_tokens"], 1200)
 
-    def test_build_runner_request_settings_increases_retry_budget_for_underlength_writing(self) -> None:
+    def test_build_runner_request_settings_increases_retry_budget_for_underlength_writing(
+        self,
+    ) -> None:
         first = text_service.build_runner_request_settings(
             text_service.PROMPT_PROFILE_WRITING,
             "Schreibe einen Infotext mit 160 bis 200 Woertern ueber eine kleine Werkstatt.",
@@ -97,15 +102,21 @@ class TextServiceConfigTests(unittest.TestCase):
         self.assertGreater(retry["max_tokens"], first["max_tokens"])
         self.assertGreaterEqual(retry["timeout_seconds"], first["timeout_seconds"])
 
-    def test_build_runner_request_settings_uses_long_form_stop_sequences_for_writing(self) -> None:
+    def test_build_runner_request_settings_uses_long_form_stop_sequences_for_writing(
+        self,
+    ) -> None:
         settings = text_service.build_runner_request_settings(
             text_service.PROMPT_PROFILE_WRITING,
             "Schreibe einen Text mit 160 bis 200 Woertern ueber ein Atelier.",
         )
 
-        self.assertEqual(settings["stop_sequences"], text_service.RUNNER_LONG_FORM_STOP_SEQUENCES)
+        self.assertEqual(
+            settings["stop_sequences"], text_service.RUNNER_LONG_FORM_STOP_SEQUENCES
+        )
 
-    def test_build_underlength_continuation_messages_requests_direct_continuation(self) -> None:
+    def test_build_underlength_continuation_messages_requests_direct_continuation(
+        self,
+    ) -> None:
         messages = text_service.build_underlength_continuation_messages(
             text_service.PROMPT_PROFILE_WRITING,
             "Schreibe einen Text mit 160 bis 200 Woertern ueber eine Werkstatt.",

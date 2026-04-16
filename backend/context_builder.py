@@ -16,9 +16,15 @@ def _clip_text(value: str | None, *, max_chars: int) -> str | None:
 
 
 def build_context_summary(request: AssistRequest, config: AppConfig) -> dict:
-    clipped_file = _clip_text(request.current_file_text, max_chars=config.file_context_max_chars)
-    clipped_selection = _clip_text(request.selected_text, max_chars=config.selection_max_chars)
-    clipped_traceback = _clip_text(request.traceback_text, max_chars=config.traceback_max_chars)
+    clipped_file = _clip_text(
+        request.current_file_text, max_chars=config.file_context_max_chars
+    )
+    clipped_selection = _clip_text(
+        request.selected_text, max_chars=config.selection_max_chars
+    )
+    clipped_traceback = _clip_text(
+        request.traceback_text, max_chars=config.traceback_max_chars
+    )
     return {
         "current_file_path": request.current_file_path,
         "workspace_root": request.workspace_root,
@@ -46,7 +52,11 @@ def build_user_prompt(request: AssistRequest, config: AppConfig) -> tuple[str, d
     if context["traceback_text"]:
         sections.append(f"Traceback / Fehler:\n{context['traceback_text']}")
     if context["selected_text"]:
-        sections.append(f"Markierter Bereich:\n```python\n{context['selected_text']}\n```")
+        sections.append(
+            f"Markierter Bereich:\n```python\n{context['selected_text']}\n```"
+        )
     if context["file_context"]:
-        sections.append(f"Aktuelle Datei (Kontextauszug):\n```python\n{context['file_context']}\n```")
+        sections.append(
+            f"Aktuelle Datei (Kontextauszug):\n```python\n{context['file_context']}\n```"
+        )
     return "\n\n".join(sections), context

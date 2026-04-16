@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from backend.schemas import AssistRequest
 
-
 SYSTEM_BASE = """Du bist eine lokale Python-Coding-KI fuer Visual Studio Code.
 Arbeite kontrolliert, knapp und technisch sauber.
 Wichtige Regeln:

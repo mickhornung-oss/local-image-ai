@@ -16,7 +16,11 @@ class ModelRuntime:
 
     @property
     def resolved_model_path(self) -> str:
-        return str(Path(self._config.model_path).resolve()) if self._config.model_path else ""
+        return (
+            str(Path(self._config.model_path).resolve())
+            if self._config.model_path
+            else ""
+        )
 
     def health_payload(self) -> dict:
         model_path = self.resolved_model_path

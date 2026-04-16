@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 WorkMode = Literal["python_task", "rewrite", "explain"]
 
 
@@ -32,4 +31,3 @@ class ErrorResponse(BaseModel):
     status: Literal["error"]
     blocker: str
     message: str
-

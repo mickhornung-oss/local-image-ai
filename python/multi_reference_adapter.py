@@ -4,7 +4,6 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
-
 MAX_MULTI_REFERENCE_SLOTS = 3
 MIN_MULTI_REFERENCE_READY_COUNT = 2
 VALID_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -63,7 +62,11 @@ def normalize_slot_index(value: object) -> int | None:
 
 
 def inspect_reference_image(path: Path) -> dict[str, Any] | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS:
+    if (
+        not path.exists()
+        or not path.is_file()
+        or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS
+    ):
         return None
     try:
         with Image.open(path) as image:
@@ -87,7 +90,9 @@ def inspect_reference_image(path: Path) -> dict[str, Any] | None:
     }
 
 
-def build_reference_record(image_path: Path, metadata: dict) -> tuple[dict[str, Any] | None, list[str]]:
+def build_reference_record(
+    image_path: Path, metadata: dict
+) -> tuple[dict[str, Any] | None, list[str]]:
     blockers: list[str] = []
     image_info = inspect_reference_image(image_path)
     if image_info is None:
@@ -131,7 +136,9 @@ def choose_primary_reference(references: list[dict[str, Any]]) -> dict[str, Any]
     return references[0]
 
 
-def build_staging_plan(references: list[dict[str, Any]], primary_reference: dict[str, Any] | None) -> dict[str, Any]:
+def build_staging_plan(
+    references: list[dict[str, Any]], primary_reference: dict[str, Any] | None
+) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     for reference in references:
         source_path = Path(reference["path"])
@@ -169,13 +176,20 @@ def derive_error_state(blockers: list[str]) -> tuple[str, str | None, str | None
         "duplicate_multi_reference_slot",
         "insufficient_multi_reference_images",
     ]
-    selected_blocker = next((blocker for blocker in prioritized_blockers if blocker in blockers), blockers[0])
+    selected_blocker = next(
+        (blocker for blocker in prioritized_blockers if blocker in blockers),
+        blockers[0],
+    )
     status = "ok" if set(blockers).issubset(READINESS_ONLY_BLOCKERS) else "error"
     return status, selected_blocker, BLOCKER_ERROR_MESSAGES.get(selected_blocker)
 
 
-def build_multi_reference_adapter_state(*, root_override: Path | None = None) -> dict[str, Any]:
-    root = root_override.resolve() if root_override is not None else multi_reference_root()
+def build_multi_reference_adapter_state(
+    *, root_override: Path | None = None
+) -> dict[str, Any]:
+    root = (
+        root_override.resolve() if root_override is not None else multi_reference_root()
+    )
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -193,25 +207,41 @@ def build_multi_reference_adapter_state(*, root_override: Path | None = None) ->
             "error_message": str(exc),
         }
 
-    metadata_paths = sorted(path for path in root.iterdir() if path.is_file() and path.suffix.lower() == ".json")
-    image_paths = sorted(path for path in root.iterdir() if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS)
+    metadata_paths = sorted(
+        path
+        for path in root.iterdir()
+        if path.is_file() and path.suffix.lower() == ".json"
+    )
+    image_paths = sorted(
+        path
+        for path in root.iterdir()
+        if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS
+    )
 
     blockers: list[str] = []
     references: list[dict[str, Any]] = []
     slot_images: dict[int, dict[str, Any]] = {}
-    slot_errors: dict[int, list[str]] = {slot_index: [] for slot_index in range(1, MAX_MULTI_REFERENCE_SLOTS + 1)}
+    slot_errors: dict[int, list[str]] = {
+        slot_index: [] for slot_index in range(1, MAX_MULTI_REFERENCE_SLOTS + 1)
+    }
 
     for metadata_path in metadata_paths:
         image_path = image_path_for_metadata(metadata_path)
         metadata = read_json_file(metadata_path)
-        slot_index = normalize_slot_index(metadata.get("slot_index")) if metadata is not None else None
+        slot_index = (
+            normalize_slot_index(metadata.get("slot_index"))
+            if metadata is not None
+            else None
+        )
         if metadata is None:
             blockers.append("invalid_multi_reference_metadata")
             continue
         if not image_path.exists() or not image_path.is_file():
             blockers.append("missing_multi_reference_file")
             if slot_index is not None:
-                slot_errors.setdefault(slot_index, []).append("missing_multi_reference_file")
+                slot_errors.setdefault(slot_index, []).append(
+                    "missing_multi_reference_file"
+                )
 
     for image_path in image_paths:
         metadata = read_json_file(metadata_path_for_image(image_path))
@@ -230,7 +260,9 @@ def build_multi_reference_adapter_state(*, root_override: Path | None = None) ->
         slot_index = int(reference_record["slot_index"])
         if slot_index in slot_images:
             blockers.append("duplicate_multi_reference_slot")
-            slot_errors.setdefault(slot_index, []).append("duplicate_multi_reference_slot")
+            slot_errors.setdefault(slot_index, []).append(
+                "duplicate_multi_reference_slot"
+            )
             continue
 
         references.append(reference_record)

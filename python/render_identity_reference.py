@@ -34,7 +34,6 @@ from render_text2img import (
     validate_checkpoint_preflight,
 )
 
-
 IDENTITY_REFERENCE_MODE = "identity_reference"
 IDENTITY_WORKFLOW_NAME = "v6_1_instantid_single_reference_api.json"
 IDENTITY_RUNTIME_MIN_VERSION = (0, 7, 0)
@@ -42,13 +41,11 @@ IDENTITY_RUNTIME_TIMEOUT = 45
 IDENTITY_REFERENCE_DEFAULT_STEPS = 28
 IDENTITY_REFERENCE_DEFAULT_CFG = 4.8
 IDENTITY_REFERENCE_WAIT_TIMEOUT = 300
-IDENTITY_REFERENCE_PROMPT_SUFFIX = (
-    "same person as the reference image, preserve recognizable face, same identity, same hair color, same key facial features"
+IDENTITY_REFERENCE_PROMPT_SUFFIX = "same person as the reference image, preserve recognizable face, same identity, same hair color, same key facial features"
+IDENTITY_REFERENCE_NEGATIVE_SUFFIX = "different person, different face, different hair color, different hairstyle, identity drift, unrecognizable face"
+COMFYUI_VENV_PYTHON = (
+    repo_root() / "vendor" / "ComfyUI" / "venv" / "Scripts" / "python.exe"
 )
-IDENTITY_REFERENCE_NEGATIVE_SUFFIX = (
-    "different person, different face, different hair color, different hairstyle, identity drift, unrecognizable face"
-)
-COMFYUI_VENV_PYTHON = repo_root() / "vendor" / "ComfyUI" / "venv" / "Scripts" / "python.exe"
 IDENTITY_REQUIRED_NODES = (
     "InstantIDModelLoader",
     "InstantIDFaceAnalysis",
@@ -56,17 +53,58 @@ IDENTITY_REQUIRED_NODES = (
 )
 IDENTITY_REQUIRED_MODELS = {
     "antelopev2": [
-        repo_root() / "vendor" / "ComfyUI" / "models" / "insightface" / "models" / "antelopev2" / "1k3d68.onnx",
-        repo_root() / "vendor" / "ComfyUI" / "models" / "insightface" / "models" / "antelopev2" / "2d106det.onnx",
-        repo_root() / "vendor" / "ComfyUI" / "models" / "insightface" / "models" / "antelopev2" / "genderage.onnx",
-        repo_root() / "vendor" / "ComfyUI" / "models" / "insightface" / "models" / "antelopev2" / "glintr100.onnx",
-        repo_root() / "vendor" / "ComfyUI" / "models" / "insightface" / "models" / "antelopev2" / "scrfd_10g_bnkps.onnx",
+        repo_root()
+        / "vendor"
+        / "ComfyUI"
+        / "models"
+        / "insightface"
+        / "models"
+        / "antelopev2"
+        / "1k3d68.onnx",
+        repo_root()
+        / "vendor"
+        / "ComfyUI"
+        / "models"
+        / "insightface"
+        / "models"
+        / "antelopev2"
+        / "2d106det.onnx",
+        repo_root()
+        / "vendor"
+        / "ComfyUI"
+        / "models"
+        / "insightface"
+        / "models"
+        / "antelopev2"
+        / "genderage.onnx",
+        repo_root()
+        / "vendor"
+        / "ComfyUI"
+        / "models"
+        / "insightface"
+        / "models"
+        / "antelopev2"
+        / "glintr100.onnx",
+        repo_root()
+        / "vendor"
+        / "ComfyUI"
+        / "models"
+        / "insightface"
+        / "models"
+        / "antelopev2"
+        / "scrfd_10g_bnkps.onnx",
     ],
     "instantid_model": [
         repo_root() / "vendor" / "ComfyUI" / "models" / "instantid" / "ip-adapter.bin",
     ],
     "instantid_controlnet": [
-        repo_root() / "vendor" / "ComfyUI" / "models" / "controlnet" / "instantid" / "diffusion_pytorch_model.safetensors",
+        repo_root()
+        / "vendor"
+        / "ComfyUI"
+        / "models"
+        / "controlnet"
+        / "instantid"
+        / "diffusion_pytorch_model.safetensors",
     ],
 }
 
@@ -79,7 +117,9 @@ def emit_status(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
 
 
-def validate_reference_image_preflight(reference_image_path: Path | None) -> tuple[str | None, str | None]:
+def validate_reference_image_preflight(
+    reference_image_path: Path | None,
+) -> tuple[str | None, str | None]:
     if reference_image_path is None:
         return "invalid_request", "missing_reference_image"
     if not reference_image_path.exists() or not reference_image_path.is_file():
@@ -102,7 +142,9 @@ def parse_version_tuple(raw_version: str | None) -> tuple[int, ...]:
     return tuple(numeric_parts[:3])
 
 
-def probe_insightface_runtime(*, timeout: int = IDENTITY_RUNTIME_TIMEOUT) -> dict[str, Any]:
+def probe_insightface_runtime(
+    *, timeout: int = IDENTITY_RUNTIME_TIMEOUT
+) -> dict[str, Any]:
     python_executable = COMFYUI_VENV_PYTHON.resolve()
     if not python_executable.exists() or not python_executable.is_file():
         return {
@@ -153,12 +195,16 @@ print(json.dumps(result, ensure_ascii=True))
             "runtime_error": str(exc),
         }
 
-    stdout_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    stdout_lines = [
+        line.strip() for line in completed.stdout.splitlines() if line.strip()
+    ]
     raw_payload = stdout_lines[-1] if stdout_lines else ""
     try:
         payload = json.loads(raw_payload)
     except json.JSONDecodeError:
-        runtime_error = completed.stderr.strip() or raw_payload or "runtime_probe_invalid"
+        runtime_error = (
+            completed.stderr.strip() or raw_payload or "runtime_probe_invalid"
+        )
         return {
             "ok": False,
             "error_type": "api_error",
@@ -176,7 +222,9 @@ print(json.dumps(result, ensure_ascii=True))
             "runtime_error": "runtime_probe_invalid",
         }
 
-    insightface_version = payload.get("version") if isinstance(payload.get("version"), str) else None
+    insightface_version = (
+        payload.get("version") if isinstance(payload.get("version"), str) else None
+    )
     if payload.get("ok") is True:
         return {
             "ok": True,
@@ -186,7 +234,9 @@ print(json.dumps(result, ensure_ascii=True))
             "runtime_error": None,
         }
 
-    runtime_error = str(payload.get("error") or "").strip() or (completed.stderr.strip() or None)
+    runtime_error = str(payload.get("error") or "").strip() or (
+        completed.stderr.strip() or None
+    )
     if runtime_error == "version_unsupported":
         return {
             "ok": False,
@@ -213,9 +263,21 @@ def build_identity_runtime_state(
     required_models_override: dict[str, list[Path]] | None = None,
     required_nodes_override: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    current_workflow_path = workflow_path_override.resolve() if workflow_path_override is not None else workflow_path()
-    required_models = required_models_override if required_models_override is not None else IDENTITY_REQUIRED_MODELS
-    required_nodes = required_nodes_override if required_nodes_override is not None else IDENTITY_REQUIRED_NODES
+    current_workflow_path = (
+        workflow_path_override.resolve()
+        if workflow_path_override is not None
+        else workflow_path()
+    )
+    required_models = (
+        required_models_override
+        if required_models_override is not None
+        else IDENTITY_REQUIRED_MODELS
+    )
+    required_nodes = (
+        required_nodes_override
+        if required_nodes_override is not None
+        else IDENTITY_REQUIRED_NODES
+    )
     if not current_workflow_path.exists() or not current_workflow_path.is_file():
         return {
             "ok": False,
@@ -313,7 +375,11 @@ def build_identity_runtime_state(
             "missing_models": [],
         }
 
-    missing_nodes = [node_name for node_name in required_nodes if not isinstance(payload.get(node_name), dict)]
+    missing_nodes = [
+        node_name
+        for node_name in required_nodes
+        if not isinstance(payload.get(node_name), dict)
+    ]
     if missing_nodes:
         return {
             "ok": False,
@@ -358,13 +424,17 @@ def run_identity_reference(
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    resolved_output_dir = output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    resolved_output_dir = (
+        output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    )
     seed_value = seed if seed >= 0 else random.randint(0, 2**31 - 1)
     prompt_id: str | None = None
     checkpoint_path = checkpoint_inventory.resolve_requested_checkpoint(checkpoint)
     current_workflow_path = Path(workflow).resolve() if workflow else workflow_path()
 
-    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(checkpoint_path)
+    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(
+        checkpoint_path
+    )
     if checkpoint_error_type is not None:
         return {
             "status": "error",
@@ -401,13 +471,17 @@ def run_identity_reference(
 
     try:
         workflow_payload = load_workflow(current_workflow_path)
-        staged_reference_image_name = stage_reference_image_for_comfy(reference_image_path.resolve())
+        staged_reference_image_name = stage_reference_image_for_comfy(
+            reference_image_path.resolve()
+        )
         effective_prompt = str(prompt or "").strip()
         if effective_prompt:
             effective_prompt = f"{effective_prompt}, {IDENTITY_REFERENCE_PROMPT_SUFFIX}"
         effective_negative_prompt = str(negative_prompt or "").strip()
         if effective_negative_prompt:
-            effective_negative_prompt = f"{effective_negative_prompt}, {IDENTITY_REFERENCE_NEGATIVE_SUFFIX}"
+            effective_negative_prompt = (
+                f"{effective_negative_prompt}, {IDENTITY_REFERENCE_NEGATIVE_SUFFIX}"
+            )
         else:
             effective_negative_prompt = IDENTITY_REFERENCE_NEGATIVE_SUFFIX
         queued_prompt = mutate_workflow(
@@ -428,7 +502,10 @@ def run_identity_reference(
         response = client.queue_prompt(queued_prompt)
         prompt_id = response.get("prompt_id")
         if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyClientError("ComfyUI queue response did not include prompt_id.", error_type="api_error")
+            raise ComfyClientError(
+                "ComfyUI queue response did not include prompt_id.",
+                error_type="api_error",
+            )
 
         log_run_context(
             logger=logger,
@@ -448,7 +525,9 @@ def run_identity_reference(
                 payload={"node_errors": node_errors},
                 mode="sdxl",
             )
-            return build_error_payload(mode=IDENTITY_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type)
+            return build_error_payload(
+                mode=IDENTITY_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type
+            )
 
         if wait:
             prompt_result = client.wait_for_prompt_result(
@@ -467,10 +546,18 @@ def run_identity_reference(
                     payload=prompt_result["history"],
                     mode="sdxl",
                 )
-                return build_error_payload(mode=IDENTITY_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=IDENTITY_REFERENCE_MODE,
+                    prompt_id=prompt_id,
+                    error_type=error_type,
+                )
 
             output_file = prompt_result.get("output_file")
-            if not isinstance(output_file, str) or not output_file or not Path(output_file).exists():
+            if (
+                not isinstance(output_file, str)
+                or not output_file
+                or not Path(output_file).exists()
+            ):
                 return build_error_payload(
                     mode=IDENTITY_REFERENCE_MODE,
                     prompt_id=prompt_id,
@@ -503,26 +590,83 @@ def run_identity_reference(
             error_type = "timeout"
         if error_logger is not None:
             error_logger(f"ERROR: {error_text}")
-        return build_error_payload(mode=IDENTITY_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type)
+        return build_error_payload(
+            mode=IDENTITY_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the isolated V6.1 identity reference workflow via ComfyUI.")
+    parser = argparse.ArgumentParser(
+        description="Run the isolated V6.1 identity reference workflow via ComfyUI."
+    )
     parser.add_argument("--prompt", required=True, help="Positive prompt text.")
-    parser.add_argument("--reference-image-path", required=True, type=Path, help="Path to the reference image.")
-    parser.add_argument("--checkpoint", help="Explicit checkpoint filename or relative path inside models/checkpoints.")
+    parser.add_argument(
+        "--reference-image-path",
+        required=True,
+        type=Path,
+        help="Path to the reference image.",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        help="Explicit checkpoint filename or relative path inside models/checkpoints.",
+    )
     parser.add_argument("--workflow", help="Optional workflow file name or JSON path.")
-    parser.add_argument("--negative-prompt", default=DEFAULT_NEGATIVE_PROMPT, help="Negative prompt text.")
-    parser.add_argument("--seed", type=int, default=-1, help="Seed value. -1 picks a random 32-bit seed.")
-    parser.add_argument("--steps", type=int, default=DEFAULT_STEPS, help="Sampling steps to inject when supported.")
-    parser.add_argument("--cfg", type=float, default=DEFAULT_CFG, help="CFG scale to inject when supported.")
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH, help="Image width when supported.")
-    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT, help="Image height when supported.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL.")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_REQUEST_TIMEOUT, help="Per-request timeout in seconds.")
-    parser.add_argument("--wait", action="store_true", help="Wait for completion and output file.")
-    parser.add_argument("--wait-timeout", type=int, default=DEFAULT_WAIT_TIMEOUT, help="Timeout for waiting on completion.")
-    parser.add_argument("--output-dir", type=Path, default=comfy_output_dir(), help="ComfyUI output directory.")
+    parser.add_argument(
+        "--negative-prompt",
+        default=DEFAULT_NEGATIVE_PROMPT,
+        help="Negative prompt text.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=-1,
+        help="Seed value. -1 picks a random 32-bit seed.",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=DEFAULT_STEPS,
+        help="Sampling steps to inject when supported.",
+    )
+    parser.add_argument(
+        "--cfg",
+        type=float,
+        default=DEFAULT_CFG,
+        help="CFG scale to inject when supported.",
+    )
+    parser.add_argument(
+        "--width", type=int, default=DEFAULT_WIDTH, help="Image width when supported."
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=DEFAULT_HEIGHT,
+        help="Image height when supported.",
+    )
+    parser.add_argument(
+        "--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL."
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_REQUEST_TIMEOUT,
+        help="Per-request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--wait", action="store_true", help="Wait for completion and output file."
+    )
+    parser.add_argument(
+        "--wait-timeout",
+        type=int,
+        default=DEFAULT_WAIT_TIMEOUT,
+        help="Timeout for waiting on completion.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=comfy_output_dir(),
+        help="ComfyUI output directory.",
+    )
     return parser
 
 

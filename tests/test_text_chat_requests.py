@@ -59,12 +59,16 @@ class TextChatRequestsTests(unittest.TestCase):
         )
 
     def test_normalize_slot_action_accepts_known_actions_only(self) -> None:
-        self.assertEqual(text_chat_requests.normalize_text_chat_slot_action(" rename "), "rename")
+        self.assertEqual(
+            text_chat_requests.normalize_text_chat_slot_action(" rename "), "rename"
+        )
         self.assertIsNone(text_chat_requests.normalize_text_chat_slot_action("unknown"))
         self.assertIsNone(text_chat_requests.normalize_text_chat_slot_action(None))
 
     def test_payload_coercion_handles_optional_and_required_payloads(self) -> None:
-        self.assertEqual(text_chat_requests.coerce_optional_text_chat_payload(None), ({}, None))
+        self.assertEqual(
+            text_chat_requests.coerce_optional_text_chat_payload(None), ({}, None)
+        )
         self.assertEqual(
             text_chat_requests.coerce_optional_text_chat_payload({"title": "Chat"}),
             ({"title": "Chat"}, None),

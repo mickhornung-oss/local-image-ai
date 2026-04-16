@@ -36,19 +36,14 @@ from render_text2img import (
     validate_checkpoint_preflight,
 )
 
-
 IDENTITY_MULTI_REFERENCE_MODE = "identity_multi_reference"
 IDENTITY_MULTI_REFERENCE_WORKFLOW_NAME = "v6_2_instantid_multi_reference_api.json"
 IDENTITY_MULTI_REFERENCE_DEFAULT_STEPS = 30
 IDENTITY_MULTI_REFERENCE_DEFAULT_CFG = 4.5
 IDENTITY_MULTI_REFERENCE_WAIT_TIMEOUT = 300
 IDENTITY_MULTI_REFERENCE_MAX_ACTIVE_REFERENCES = 2
-IDENTITY_MULTI_REFERENCE_PROMPT_SUFFIX = (
-    "same person as the reference images, preserve recognizable face, same identity, same hair color, same key facial features"
-)
-IDENTITY_MULTI_REFERENCE_NEGATIVE_SUFFIX = (
-    "different person, different face, different hair color, different hairstyle, identity drift, unrecognizable face"
-)
+IDENTITY_MULTI_REFERENCE_PROMPT_SUFFIX = "same person as the reference images, preserve recognizable face, same identity, same hair color, same key facial features"
+IDENTITY_MULTI_REFERENCE_NEGATIVE_SUFFIX = "different person, different face, different hair color, different hairstyle, identity drift, unrecognizable face"
 IDENTITY_MULTI_REFERENCE_REQUIRED_NODES = (
     "InstantIDModelLoader",
     "InstantIDFaceAnalysis",
@@ -80,17 +75,33 @@ def build_identity_multi_reference_runtime_state(
     required_nodes_override: tuple[str, ...] | None = None,
     required_models_override: dict[str, list[Path]] | None = None,
 ) -> dict[str, Any]:
-    current_adapter_state = adapter_state if isinstance(adapter_state, dict) else build_multi_reference_adapter_state()
+    current_adapter_state = (
+        adapter_state
+        if isinstance(adapter_state, dict)
+        else build_multi_reference_adapter_state()
+    )
     if current_adapter_state.get("ready") is not True:
         blockers = current_adapter_state.get("blockers")
-        blocker = blockers[0] if isinstance(blockers, list) and blockers else "insufficient_multi_reference_images"
-        error_type, normalized_blocker = resolve_multi_reference_runtime_error(str(blocker))
+        blocker = (
+            blockers[0]
+            if isinstance(blockers, list) and blockers
+            else "insufficient_multi_reference_images"
+        )
+        error_type, normalized_blocker = resolve_multi_reference_runtime_error(
+            str(blocker)
+        )
         return {
             "ok": False,
             "error_type": error_type,
             "blocker": normalized_blocker,
             "adapter_state": current_adapter_state,
-            "workflow_path": str((workflow_path_override.resolve() if workflow_path_override is not None else workflow_path())),
+            "workflow_path": str(
+                (
+                    workflow_path_override.resolve()
+                    if workflow_path_override is not None
+                    else workflow_path()
+                )
+            ),
             "insightface_version": None,
             "runtime_error": None,
             "missing_nodes": [],
@@ -100,8 +111,16 @@ def build_identity_multi_reference_runtime_state(
     runtime_state = build_identity_runtime_state(
         base_url=base_url,
         timeout=timeout,
-        workflow_path_override=workflow_path_override.resolve() if workflow_path_override is not None else workflow_path(),
-        required_nodes_override=required_nodes_override if required_nodes_override is not None else IDENTITY_MULTI_REFERENCE_REQUIRED_NODES,
+        workflow_path_override=(
+            workflow_path_override.resolve()
+            if workflow_path_override is not None
+            else workflow_path()
+        ),
+        required_nodes_override=(
+            required_nodes_override
+            if required_nodes_override is not None
+            else IDENTITY_MULTI_REFERENCE_REQUIRED_NODES
+        ),
         required_models_override=required_models_override,
     )
     runtime_state["adapter_state"] = current_adapter_state
@@ -127,7 +146,9 @@ def stage_multi_reference_images_for_comfy(adapter_state: dict[str, Any]) -> lis
         shutil.copy2(source_path, temp_path)
         temp_path.replace(target_path)
         expected_names.add(target_name)
-        staged_names.append("/".join(target_path.relative_to(comfy_app_input_dir().parent).parts))
+        staged_names.append(
+            "/".join(target_path.relative_to(comfy_app_input_dir().parent).parts)
+        )
 
     for stale_path in target_dir.iterdir():
         if not stale_path.is_file():
@@ -205,12 +226,16 @@ def run_identity_multi_reference(
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    resolved_output_dir = output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    resolved_output_dir = (
+        output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    )
     seed_value = seed if seed >= 0 else random.randint(0, 2**31 - 1)
     prompt_id: str | None = None
     checkpoint_path = checkpoint_inventory.resolve_requested_checkpoint(checkpoint)
 
-    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(checkpoint_path)
+    checkpoint_error_type, checkpoint_blocker = validate_checkpoint_preflight(
+        checkpoint_path
+    )
     if checkpoint_error_type is not None:
         return {
             "status": "error",
@@ -237,18 +262,24 @@ def run_identity_multi_reference(
         }
 
     effective_adapter_state = runtime_state["adapter_state"]
-    references = effective_adapter_state["references"][:IDENTITY_MULTI_REFERENCE_MAX_ACTIVE_REFERENCES]
+    references = effective_adapter_state["references"][
+        :IDENTITY_MULTI_REFERENCE_MAX_ACTIVE_REFERENCES
+    ]
     try:
         workflow_payload = load_workflow(workflow_path())
         effective_prompt = str(prompt or "").strip()
         if effective_prompt:
-            effective_prompt = f"{effective_prompt}, {IDENTITY_MULTI_REFERENCE_PROMPT_SUFFIX}"
+            effective_prompt = (
+                f"{effective_prompt}, {IDENTITY_MULTI_REFERENCE_PROMPT_SUFFIX}"
+            )
         effective_negative_prompt = str(negative_prompt or "").strip()
         if effective_negative_prompt:
             effective_negative_prompt = f"{effective_negative_prompt}, {IDENTITY_MULTI_REFERENCE_NEGATIVE_SUFFIX}"
         else:
             effective_negative_prompt = IDENTITY_MULTI_REFERENCE_NEGATIVE_SUFFIX
-        staged_image_names = stage_multi_reference_images_for_comfy(effective_adapter_state)
+        staged_image_names = stage_multi_reference_images_for_comfy(
+            effective_adapter_state
+        )
         queued_prompt = mutate_multi_reference_workflow(
             workflow=workflow_payload,
             staged_image_names=staged_image_names,
@@ -267,7 +298,10 @@ def run_identity_multi_reference(
         response = client.queue_prompt(queued_prompt)
         prompt_id = response.get("prompt_id")
         if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyClientError("ComfyUI queue response did not include prompt_id.", error_type="api_error")
+            raise ComfyClientError(
+                "ComfyUI queue response did not include prompt_id.",
+                error_type="api_error",
+            )
 
         log_run_context(
             logger=logger,
@@ -287,7 +321,11 @@ def run_identity_multi_reference(
                 payload={"node_errors": node_errors},
                 mode="sdxl",
             )
-            return build_error_payload(mode=IDENTITY_MULTI_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type)
+            return build_error_payload(
+                mode=IDENTITY_MULTI_REFERENCE_MODE,
+                prompt_id=prompt_id,
+                error_type=error_type,
+            )
 
         if wait:
             prompt_result = client.wait_for_prompt_result(
@@ -306,10 +344,18 @@ def run_identity_multi_reference(
                     payload=prompt_result["history"],
                     mode="sdxl",
                 )
-                return build_error_payload(mode=IDENTITY_MULTI_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=IDENTITY_MULTI_REFERENCE_MODE,
+                    prompt_id=prompt_id,
+                    error_type=error_type,
+                )
 
             output_file = prompt_result.get("output_file")
-            if not isinstance(output_file, str) or not output_file or not Path(output_file).exists():
+            if (
+                not isinstance(output_file, str)
+                or not output_file
+                or not Path(output_file).exists()
+            ):
                 return build_error_payload(
                     mode=IDENTITY_MULTI_REFERENCE_MODE,
                     prompt_id=prompt_id,
@@ -323,9 +369,15 @@ def run_identity_multi_reference(
             )
             payload["checkpoint"] = checkpoint_path.name if checkpoint_path else None
             payload["reference_count"] = len(references)
-            payload["reference_slots"] = [int(reference["slot_index"]) for reference in references]
-            payload["reference_image_ids"] = [str(reference["image_id"]) for reference in references]
-            payload["multi_reference_strategy"] = "instantid_primary_two_reference_batch"
+            payload["reference_slots"] = [
+                int(reference["slot_index"]) for reference in references
+            ]
+            payload["reference_image_ids"] = [
+                str(reference["image_id"]) for reference in references
+            ]
+            payload["multi_reference_strategy"] = (
+                "instantid_primary_two_reference_batch"
+            )
             return payload
 
         payload = build_success_payload(
@@ -335,8 +387,12 @@ def run_identity_multi_reference(
         )
         payload["checkpoint"] = checkpoint_path.name if checkpoint_path else None
         payload["reference_count"] = len(references)
-        payload["reference_slots"] = [int(reference["slot_index"]) for reference in references]
-        payload["reference_image_ids"] = [str(reference["image_id"]) for reference in references]
+        payload["reference_slots"] = [
+            int(reference["slot_index"]) for reference in references
+        ]
+        payload["reference_image_ids"] = [
+            str(reference["image_id"]) for reference in references
+        ]
         payload["multi_reference_strategy"] = "instantid_primary_two_reference_batch"
         return payload
     except ComfyClientError as exc:
@@ -350,24 +406,78 @@ def run_identity_multi_reference(
             error_type = "timeout"
         if error_logger is not None:
             error_logger(f"ERROR: {error_text}")
-        return build_error_payload(mode=IDENTITY_MULTI_REFERENCE_MODE, prompt_id=prompt_id, error_type=error_type)
+        return build_error_payload(
+            mode=IDENTITY_MULTI_REFERENCE_MODE,
+            prompt_id=prompt_id,
+            error_type=error_type,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the isolated V6.2.3 multi-reference identity workflow via ComfyUI.")
+    parser = argparse.ArgumentParser(
+        description="Run the isolated V6.2.3 multi-reference identity workflow via ComfyUI."
+    )
     parser.add_argument("--prompt", required=True, help="Positive prompt text.")
-    parser.add_argument("--checkpoint", help="Explicit checkpoint filename or relative path inside models/checkpoints.")
-    parser.add_argument("--negative-prompt", default=DEFAULT_NEGATIVE_PROMPT, help="Negative prompt text.")
-    parser.add_argument("--seed", type=int, default=-1, help="Seed value. -1 picks a random 32-bit seed.")
-    parser.add_argument("--steps", type=int, default=DEFAULT_STEPS, help="Sampling steps to inject when supported.")
-    parser.add_argument("--cfg", type=float, default=DEFAULT_CFG, help="CFG scale to inject when supported.")
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH, help="Image width when supported.")
-    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT, help="Image height when supported.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL.")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_REQUEST_TIMEOUT, help="Per-request timeout in seconds.")
-    parser.add_argument("--wait", action="store_true", help="Wait for completion and output file.")
-    parser.add_argument("--wait-timeout", type=int, default=DEFAULT_WAIT_TIMEOUT, help="Timeout for waiting on completion.")
-    parser.add_argument("--output-dir", type=Path, default=comfy_output_dir(), help="ComfyUI output directory.")
+    parser.add_argument(
+        "--checkpoint",
+        help="Explicit checkpoint filename or relative path inside models/checkpoints.",
+    )
+    parser.add_argument(
+        "--negative-prompt",
+        default=DEFAULT_NEGATIVE_PROMPT,
+        help="Negative prompt text.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=-1,
+        help="Seed value. -1 picks a random 32-bit seed.",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=DEFAULT_STEPS,
+        help="Sampling steps to inject when supported.",
+    )
+    parser.add_argument(
+        "--cfg",
+        type=float,
+        default=DEFAULT_CFG,
+        help="CFG scale to inject when supported.",
+    )
+    parser.add_argument(
+        "--width", type=int, default=DEFAULT_WIDTH, help="Image width when supported."
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=DEFAULT_HEIGHT,
+        help="Image height when supported.",
+    )
+    parser.add_argument(
+        "--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL."
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_REQUEST_TIMEOUT,
+        help="Per-request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--wait", action="store_true", help="Wait for completion and output file."
+    )
+    parser.add_argument(
+        "--wait-timeout",
+        type=int,
+        default=DEFAULT_WAIT_TIMEOUT,
+        help="Timeout for waiting on completion.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=comfy_output_dir(),
+        help="ComfyUI output directory.",
+    )
     return parser
 
 

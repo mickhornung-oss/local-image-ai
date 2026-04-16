@@ -27,11 +27,15 @@ class TextChatResponsesTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["slot"]["slot_index"], 2)
         self.assertEqual(payload["slot"]["title"], "Projektchat")
-        self.assertEqual(payload["model_profiles"], [{"id": "standard"}, {"id": "multilingual"}])
+        self.assertEqual(
+            payload["model_profiles"], [{"id": "standard"}, {"id": "multilingual"}]
+        )
         self.assertEqual(payload["current_model_profile_id"], "multilingual")
         self.assertEqual(payload["model_switch_state"], {"busy": False})
 
-    def test_build_slot_detail_response_uses_stable_defaults_for_missing_data(self) -> None:
+    def test_build_slot_detail_response_uses_stable_defaults_for_missing_data(
+        self,
+    ) -> None:
         payload = text_chat_responses.build_text_chat_slot_detail_response(
             slot=None,
             profile_state=None,

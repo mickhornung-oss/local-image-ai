@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 DEFAULT_LONG_FORM_WORD_TARGET = 110
 MAX_LONG_FORM_WORD_TARGET = 1400
 
@@ -43,7 +42,9 @@ def extract_requested_word_bounds(prompt: str) -> tuple[int, int] | None:
             if upper_target < 40:
                 return None
             lower_target = max(40, lower_target)
-            upper_target = max(lower_target, min(MAX_LONG_FORM_WORD_TARGET, upper_target))
+            upper_target = max(
+                lower_target, min(MAX_LONG_FORM_WORD_TARGET, upper_target)
+            )
             return lower_target, upper_target
 
     match = re.search(
@@ -115,19 +116,72 @@ def extract_style_hints(prompt: str) -> list[str]:
 
 def infer_prompt_language(prompt: str) -> str | None:
     normalized = f" {prompt.lower()} "
-    explicit_english_markers = (" in english ", " auf englisch ", " english ", " englisch ")
-    explicit_spanish_markers = (" in spanish ", " auf spanisch ", " spanish ", " spanisch ", " espanol ", " espaÃ±ol ")
-    explicit_french_markers = (" in french ", " auf franzoesisch ", " french ", " francais ", " franÃ§ais ", " franzoesisch ")
+    explicit_english_markers = (
+        " in english ",
+        " auf englisch ",
+        " english ",
+        " englisch ",
+    )
+    explicit_spanish_markers = (
+        " in spanish ",
+        " auf spanisch ",
+        " spanish ",
+        " spanisch ",
+        " espanol ",
+        " espaÃ±ol ",
+    )
+    explicit_french_markers = (
+        " in french ",
+        " auf franzoesisch ",
+        " french ",
+        " francais ",
+        " franÃ§ais ",
+        " franzoesisch ",
+    )
     if any(marker in normalized for marker in explicit_english_markers):
         return "en"
     if any(marker in normalized for marker in explicit_spanish_markers):
         return "es"
     if any(marker in normalized for marker in explicit_french_markers):
         return "fr"
-    english_markers = (" the ", " and ", " with ", " into ", " rewrite ", " draft ", " words ")
-    spanish_markers = (" el ", " la ", " los ", " las ", " con ", " para ", " reescribe ", " palabras ")
-    french_markers = (" le ", " la ", " les ", " avec ", " pour ", " rÃ©Ã©cris ", " mots ")
-    german_markers = (" der ", " die ", " das ", " und ", " mit ", " fuer ", " woerter ", " Ã¼berarbeite ")
+    english_markers = (
+        " the ",
+        " and ",
+        " with ",
+        " into ",
+        " rewrite ",
+        " draft ",
+        " words ",
+    )
+    spanish_markers = (
+        " el ",
+        " la ",
+        " los ",
+        " las ",
+        " con ",
+        " para ",
+        " reescribe ",
+        " palabras ",
+    )
+    french_markers = (
+        " le ",
+        " la ",
+        " les ",
+        " avec ",
+        " pour ",
+        " rÃ©Ã©cris ",
+        " mots ",
+    )
+    german_markers = (
+        " der ",
+        " die ",
+        " das ",
+        " und ",
+        " mit ",
+        " fuer ",
+        " woerter ",
+        " Ã¼berarbeite ",
+    )
 
     marker_sets = [
         ("en", english_markers),
@@ -186,7 +240,9 @@ def build_word_target_instruction(
         target_text = f"ungefaehr {word_target} Woerter"
     else:
         minimum_words, maximum_words = word_bounds
-        target_text = f"moeglichst zwischen {minimum_words} und {maximum_words} Woertern"
+        target_text = (
+            f"moeglichst zwischen {minimum_words} und {maximum_words} Woertern"
+        )
     if retry:
         return (
             f"Ziel: {target_text}. Schreibe mindestens {minimum_words} und hoechstens {maximum_words} Woerter. "
@@ -199,10 +255,17 @@ def build_word_target_instruction(
 
 
 def count_response_words(text: str) -> int:
-    return len(re.findall(r"[A-Za-z0-9\u00c0-\u024f\u00df]+(?:['-][A-Za-z0-9\u00c0-\u024f\u00df]+)*", text))
+    return len(
+        re.findall(
+            r"[A-Za-z0-9\u00c0-\u024f\u00df]+(?:['-][A-Za-z0-9\u00c0-\u024f\u00df]+)*",
+            text,
+        )
+    )
 
 
-def calculate_word_bounds_distance(word_bounds: tuple[int, int] | None, actual_words: int) -> int:
+def calculate_word_bounds_distance(
+    word_bounds: tuple[int, int] | None, actual_words: int
+) -> int:
     if word_bounds is None:
         return 0
     minimum_words, maximum_words = word_bounds
@@ -317,7 +380,9 @@ def classify_prompt_profile(prompt: str) -> str:
         "ueberblick",
         "ÃƒÆ’Ã‚Â¼berblick",
     )
-    has_text_over_topic = re.search(r"\btext\s+(?:ueber|ÃƒÆ’Ã‚Â¼ber)\b", normalized) is not None
+    has_text_over_topic = (
+        re.search(r"\btext\s+(?:ueber|ÃƒÆ’Ã‚Â¼ber)\b", normalized) is not None
+    )
 
     if any(keyword in normalized for keyword in image_keywords):
         return PROMPT_PROFILE_IMAGE
@@ -327,11 +392,20 @@ def classify_prompt_profile(prompt: str) -> str:
         return PROMPT_PROFILE_WRITING
     if any(keyword in normalized for keyword in creative_style_keywords):
         return PROMPT_PROFILE_WRITING
-    if any(keyword in normalized for keyword in info_keywords) and any(keyword in normalized for keyword in writing_request_keywords):
+    if any(keyword in normalized for keyword in info_keywords) and any(
+        keyword in normalized for keyword in writing_request_keywords
+    ):
         return PROMPT_PROFILE_INFO
-    if word_target is not None and has_text_over_topic and not any(keyword in normalized for keyword in creative_style_keywords):
+    if (
+        word_target is not None
+        and has_text_over_topic
+        and not any(keyword in normalized for keyword in creative_style_keywords)
+    ):
         return PROMPT_PROFILE_INFO
-    if any(keyword in normalized for keyword in writing_request_keywords) and word_target is not None:
+    if (
+        any(keyword in normalized for keyword in writing_request_keywords)
+        and word_target is not None
+    ):
         return PROMPT_PROFILE_WRITING
     if any(keyword in normalized for keyword in writing_request_keywords) and re.search(
         r"\b(text|abschnitt|brief|karte|mail|email|nachricht|gedicht)\b", normalized

@@ -25,7 +25,9 @@ class UploadRequestError(Exception):
         self.message = message
 
 
-def normalize_optional_negative_prompt(value: object, *, max_length: int) -> tuple[str | None, str | None]:
+def normalize_optional_negative_prompt(
+    value: object, *, max_length: int
+) -> tuple[str | None, str | None]:
     if value is None:
         return None, None
     if not isinstance(value, str):
@@ -55,7 +57,9 @@ def validate_multipart_content_type(content_type: str) -> None:
         )
 
 
-def normalize_upload_source_type(value: str | None, *, valid_source_types: set[str] | frozenset[str]) -> str:
+def normalize_upload_source_type(
+    value: str | None, *, valid_source_types: set[str] | frozenset[str]
+) -> str:
     normalized = str(value or "file").strip().lower()
     if normalized not in valid_source_types:
         raise UploadRequestError(
@@ -74,7 +78,8 @@ def parse_multipart_image(
     source_type_normalizer,
 ) -> tuple[str, bytes, str]:
     message = BytesParser(policy=email_policy_default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        + body
     )
     if not message.is_multipart():
         raise UploadRequestError(
@@ -89,7 +94,11 @@ def parse_multipart_image(
     for part in message.iter_parts():
         if part.get_content_disposition() != "form-data":
             continue
-        field_name = str(part.get_param("name", header="content-disposition") or "").strip().lower()
+        field_name = (
+            str(part.get_param("name", header="content-disposition") or "")
+            .strip()
+            .lower()
+        )
         filename = part.get_filename()
         if not filename:
             if field_name == "source_type":
@@ -123,7 +132,8 @@ def parse_multipart_multi_reference_image(
     slot_index_parser,
 ) -> tuple[str, bytes, int | None]:
     message = BytesParser(policy=email_policy_default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        + body
     )
     if not message.is_multipart():
         raise UploadRequestError(
@@ -138,7 +148,11 @@ def parse_multipart_multi_reference_image(
     for part in message.iter_parts():
         if part.get_content_disposition() != "form-data":
             continue
-        field_name = str(part.get_param("name", header="content-disposition") or "").strip().lower()
+        field_name = (
+            str(part.get_param("name", header="content-disposition") or "")
+            .strip()
+            .lower()
+        )
         filename = part.get_filename()
         if not filename:
             if field_name == "slot_index":
@@ -181,7 +195,8 @@ def parse_multipart_identity_transfer_role_image(
     role_parser,
 ) -> tuple[str, bytes, str]:
     message = BytesParser(policy=email_policy_default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        + body
     )
     if not message.is_multipart():
         raise UploadRequestError(
@@ -196,7 +211,11 @@ def parse_multipart_identity_transfer_role_image(
     for part in message.iter_parts():
         if part.get_content_disposition() != "form-data":
             continue
-        field_name = str(part.get_param("name", header="content-disposition") or "").strip().lower()
+        field_name = (
+            str(part.get_param("name", header="content-disposition") or "")
+            .strip()
+            .lower()
+        )
         filename = part.get_filename()
         if not filename:
             if field_name == "role":
@@ -304,7 +323,9 @@ def inspect_image_upload(
     }
 
 
-def normalize_mask_upload_payload(payload: bytes, *, mask_binary_threshold: int) -> tuple[bytes, dict]:
+def normalize_mask_upload_payload(
+    payload: bytes, *, mask_binary_threshold: int
+) -> tuple[bytes, dict]:
     try:
         with Image.open(BytesIO(payload)) as image:
             image.load()

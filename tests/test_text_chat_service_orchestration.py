@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
 import python.text_chat_service_orchestration as text_chat_service
 
@@ -58,17 +58,31 @@ class TextChatServiceOrchestrationTests(unittest.TestCase):
         self.assertEqual(prepared["recent_messages"], [])
         self.assertIsNone(prepared["summary"])
 
-    def test_execute_request_retries_once_after_switch_when_predicate_matches(self) -> None:
+    def test_execute_request_retries_once_after_switch_when_predicate_matches(
+        self,
+    ) -> None:
         calls: list[dict] = []
         sleeps: list[float] = []
         responses = iter(
             [
                 ({}, "timeout", None, None, None),
-                ({"ok": True, "response_text": "Antwort"}, None, HTTPStatus.OK, "svc", "ready"),
+                (
+                    {"ok": True, "response_text": "Antwort"},
+                    None,
+                    HTTPStatus.OK,
+                    "svc",
+                    "ready",
+                ),
             ]
         )
 
-        def request_callable(prompt: str, *, mode: str | None, summary: str | None, recent_messages: list[dict]):
+        def request_callable(
+            prompt: str,
+            *,
+            mode: str | None,
+            summary: str | None,
+            recent_messages: list[dict],
+        ):
             calls.append(
                 {
                     "prompt": prompt,
@@ -93,9 +107,13 @@ class TextChatServiceOrchestrationTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(sleeps, [5.0])
         self.assertEqual(result["response_status"], HTTPStatus.OK)
-        self.assertEqual(result["response_payload"], {"ok": True, "response_text": "Antwort"})
+        self.assertEqual(
+            result["response_payload"], {"ok": True, "response_text": "Antwort"}
+        )
 
-    def test_normalize_service_result_maps_transport_service_and_success_cases(self) -> None:
+    def test_normalize_service_result_maps_transport_service_and_success_cases(
+        self,
+    ) -> None:
         unavailable = text_chat_service.normalize_text_chat_service_result(
             response_payload=None,
             response_error="timeout",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
 import python.identity_generate_results as identity_generate_results
 
@@ -35,7 +35,12 @@ class IdentityGenerateResultsTests(unittest.TestCase):
 
     def test_finalize_outcome_maps_render_error_to_error_response(self) -> None:
         status, payload = identity_generate_results.finalize_identity_generate_outcome(
-            {"status": "error", "error_type": "api_error", "blocker": "identity_transfer_unavailable", "prompt_id": "p-1"},
+            {
+                "status": "error",
+                "error_type": "api_error",
+                "blocker": "identity_transfer_unavailable",
+                "prompt_id": "p-1",
+            },
             request_id="req-000002",
             mode="identity_transfer",
             prompt="Prompt",
@@ -70,10 +75,12 @@ class IdentityGenerateResultsTests(unittest.TestCase):
         self.assertEqual(payload["error_type"], "api_error")
 
     def test_build_server_error_returns_internal_error_response(self) -> None:
-        status, payload = identity_generate_results.build_identity_generate_server_error(
-            mode="identity_research",
-            request_id="req-000004",
-            error_response_builder=lambda **kwargs: kwargs,
+        status, payload = (
+            identity_generate_results.build_identity_generate_server_error(
+                mode="identity_research",
+                request_id="req-000004",
+                error_response_builder=lambda **kwargs: kwargs,
+            )
         )
 
         self.assertEqual(status, HTTPStatus.INTERNAL_SERVER_ERROR)

@@ -16,7 +16,6 @@ from render_identity_research_pulid_v11 import (
     run_pulid_v11_identity_research,
 )
 
-
 IDENTITY_RESEARCH_MODE = "identity_research"
 IDENTITY_RESEARCH_DEFAULT_PROVIDER = "instantid"
 IDENTITY_RESEARCH_SUPPORTED_PROVIDERS = (
@@ -67,7 +66,10 @@ def build_identity_research_runtime_state(
         for provider_id in IDENTITY_RESEARCH_SUPPORTED_PROVIDERS
     }
     return {
-        "ok": all(provider_state.get("ok") is True for provider_state in providers_payload.values()),
+        "ok": all(
+            provider_state.get("ok") is True
+            for provider_state in providers_payload.values()
+        ),
         "mode": IDENTITY_RESEARCH_MODE,
         "provider": None,
         "providers": providers_payload,
@@ -95,7 +97,9 @@ def run_identity_research(
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    normalized_provider = str(provider or "").strip().lower() or IDENTITY_RESEARCH_DEFAULT_PROVIDER
+    normalized_provider = (
+        str(provider or "").strip().lower() or IDENTITY_RESEARCH_DEFAULT_PROVIDER
+    )
     if normalized_provider not in IDENTITY_RESEARCH_SUPPORTED_PROVIDERS:
         return {
             "status": "error",

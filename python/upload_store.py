@@ -52,7 +52,9 @@ def input_metadata_path(path: Path) -> Path:
 def write_input_metadata(path: Path, metadata: dict) -> None:
     metadata_path = input_metadata_path(path)
     temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
-    temp_path.write_text(json.dumps(metadata, ensure_ascii=True, separators=(",", ":")), encoding="utf-8")
+    temp_path.write_text(
+        json.dumps(metadata, ensure_ascii=True, separators=(",", ":")), encoding="utf-8"
+    )
     temp_path.replace(metadata_path)
 
 
@@ -79,7 +81,11 @@ def _describe_stored_image(
     source_type: str,
     metadata_enricher: Callable[[dict], dict] | None = None,
 ) -> dict | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in valid_upload_extensions:
+    if (
+        not path.exists()
+        or not path.is_file()
+        or path.suffix.lower() not in valid_upload_extensions
+    ):
         return None
     try:
         with Image.open(path) as image:
@@ -236,7 +242,8 @@ def _current_stored_image_state(
     try:
         root.mkdir(parents=True, exist_ok=True)
         candidates = sorted(
-            path for path in root.iterdir()
+            path
+            for path in root.iterdir()
             if path.is_file() and path.suffix.lower() in valid_upload_extensions
         )
     except OSError:
@@ -310,7 +317,8 @@ def list_stored_multi_reference_images(
     try:
         root.mkdir(parents=True, exist_ok=True)
         candidates = [
-            path for path in root.iterdir()
+            path
+            for path in root.iterdir()
             if path.is_file() and path.suffix.lower() in valid_upload_extensions
         ]
     except OSError:
@@ -371,19 +379,28 @@ def store_uploaded_image(
     normalized_source_type = normalize_source_type(source_type)
     is_mask_upload = normalized_source_type == "mask"
     root = mask_root() if is_mask_upload else input_root()
-    dir_accessible, dir_error = (mask_dir_access_state() if is_mask_upload else input_dir_access_state())
+    dir_accessible, dir_error = (
+        mask_dir_access_state() if is_mask_upload else input_dir_access_state()
+    )
     if not dir_accessible:
         raise UploadRequestError(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             error_type="upload_error",
-            blocker=dir_error or ("mask_dir_not_accessible" if is_mask_upload else "input_dir_not_accessible"),
+            blocker=dir_error
+            or (
+                "mask_dir_not_accessible"
+                if is_mask_upload
+                else "input_dir_not_accessible"
+            ),
             message="Input directory is not writable.",
         )
 
     image_info = inspect_image_upload(original_name, payload)
     stored_payload = payload
     if is_mask_upload:
-        normalized_payload, normalized_mask_info = normalize_mask_upload_payload(payload)
+        normalized_payload, normalized_mask_info = normalize_mask_upload_payload(
+            payload
+        )
         stored_payload = normalized_payload
         image_info.update(normalized_mask_info)
 
@@ -417,7 +434,11 @@ def store_uploaded_image(
             message="Uploaded image could not be stored.",
         ) from exc
 
-    stored_image = describe_stored_mask_image(final_path) if is_mask_upload else describe_stored_input_image(final_path)
+    stored_image = (
+        describe_stored_mask_image(final_path)
+        if is_mask_upload
+        else describe_stored_input_image(final_path)
+    )
     if stored_image is None or not is_accessible_output_file(final_path):
         final_path.unlink(missing_ok=True)
         input_metadata_path(final_path).unlink(missing_ok=True)
@@ -521,7 +542,9 @@ def store_multi_reference_image(
         )
 
     image_info = inspect_image_upload(original_name, payload)
-    resolved_slot_index = slot_index if slot_index is not None else find_first_free_multi_reference_slot()
+    resolved_slot_index = (
+        slot_index if slot_index is not None else find_first_free_multi_reference_slot()
+    )
     if resolved_slot_index is None:
         raise UploadRequestError(
             status_code=HTTPStatus.CONFLICT,

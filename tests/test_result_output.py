@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import re
+import unittest
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import re
-import unittest
 
 from PIL import Image
 
 from python import result_output
-
 
 VALID_UPLOAD_EXTENSIONS = frozenset({".png"})
 VALID_UPLOAD_FORMATS = {"PNG": (".png", "image/png")}
@@ -78,7 +77,10 @@ class ResultOutputTests(unittest.TestCase):
                 use_inpainting=False,
                 extra_metadata={"experimental": True},
                 results_dir_access_state=lambda: (True, None),
-                resolve_internal_output_path=lambda output_file: (Path(str(output_file)).resolve(), None),
+                resolve_internal_output_path=lambda output_file: (
+                    Path(str(output_file)).resolve(),
+                    None,
+                ),
                 is_accessible_output_file=lambda path: path.exists(),
                 inspect_result_image=lambda path: result_output.inspect_result_image(
                     path,
@@ -128,7 +130,12 @@ class ResultOutputTests(unittest.TestCase):
                 results_dir_access_state=lambda: (True, None),
                 exports_dir_access_state=lambda: (True, None),
                 resolve_result_download_item=lambda result_id: (
-                    {"result_id": result_id, "file_name": "result-1.png", "mode": "txt2img", "checkpoint": "model.safetensors"},
+                    {
+                        "result_id": result_id,
+                        "file_name": "result-1.png",
+                        "mode": "txt2img",
+                        "checkpoint": "model.safetensors",
+                    },
                     image_path,
                 ),
                 reserve_export_target_path=lambda file_name: exports_root / file_name,
@@ -156,10 +163,16 @@ class ResultOutputTests(unittest.TestCase):
 
             payload = result_output.delete_stored_result(
                 "result-20260406120000-abcd1234",
-                is_managed_result_id=lambda value: bool(re.fullmatch(r"result-\d{14}-[0-9a-f]{8}", str(value))),
+                is_managed_result_id=lambda value: bool(
+                    re.fullmatch(r"result-\d{14}-[0-9a-f]{8}", str(value))
+                ),
                 results_dir_access_state=lambda: (True, None),
                 resolve_result_download_item=lambda result_id: (
-                    {"result_id": result_id, "file_name": image_path.name, "store_scope": "app_results"},
+                    {
+                        "result_id": result_id,
+                        "file_name": image_path.name,
+                        "store_scope": "app_results",
+                    },
                     image_path,
                 ),
                 result_root=results_root,
@@ -172,7 +185,12 @@ class ResultOutputTests(unittest.TestCase):
 
     def test_finalize_generate_result_maps_success_payload(self) -> None:
         status, payload = result_output.finalize_generate_result(
-            {"status": "ok", "mode": "txt2img", "prompt_id": "prompt-1", "output_file": "ignored.png"},
+            {
+                "status": "ok",
+                "mode": "txt2img",
+                "prompt_id": "prompt-1",
+                "output_file": "ignored.png",
+            },
             "req-1",
             prompt="Prompt",
             checkpoint="model.safetensors",
@@ -204,8 +222,12 @@ class ResultOutputTests(unittest.TestCase):
             exports_dir_access_state=lambda: (True, None),
             count_export_store_files=lambda: 3,
         )
-        export_payload = result_output.build_result_export_success_response({"result_id": "r1"})
-        delete_payload = result_output.build_result_delete_success_response({"result_id": "r1"})
+        export_payload = result_output.build_result_export_success_response(
+            {"result_id": "r1"}
+        )
+        delete_payload = result_output.build_result_delete_success_response(
+            {"result_id": "r1"}
+        )
         list_payload = result_output.build_results_list_response(
             count=1,
             total_count=2,

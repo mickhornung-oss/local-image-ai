@@ -10,7 +10,6 @@ from typing import Any, Callable
 import checkpoint_inventory
 from comfy_client import ComfyClient, ComfyClientError
 
-
 MINIMAL_WORKFLOW_NAME = "sdxl_text2img_minimal.json"
 IMG2IMG_WORKFLOW_NAME = "sdxl_img2img_minimal.json"
 INPAINT_WORKFLOW_NAME = "sdxl_inpaint_minimal.json"
@@ -71,7 +70,9 @@ def load_workflow(path: Path) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise ComfyClientError(f"Workflow file not found: {path}") from exc
     except json.JSONDecodeError as exc:
-        raise ComfyClientError(f"Workflow file is not valid JSON: {path}: {exc}") from exc
+        raise ComfyClientError(
+            f"Workflow file is not valid JSON: {path}: {exc}"
+        ) from exc
 
     if not isinstance(payload, dict):
         raise ComfyClientError(f"Workflow file must contain a JSON object: {path}")
@@ -95,9 +96,13 @@ def select_workflow_and_checkpoint(
 ) -> tuple[Path, Path | None, str]:
     normalized_mode = render_mode.lower()
     if normalized_mode not in {"auto", "sdxl", "placeholder"}:
-        raise ComfyClientError(f"Unsupported render mode: {render_mode}", error_type="api_error")
+        raise ComfyClientError(
+            f"Unsupported render mode: {render_mode}", error_type="api_error"
+        )
 
-    checkpoint_path = checkpoint_inventory.resolve_requested_checkpoint(explicit_checkpoint)
+    checkpoint_path = checkpoint_inventory.resolve_requested_checkpoint(
+        explicit_checkpoint
+    )
     if use_inpainting:
         sdxl_workflow_name = INPAINT_WORKFLOW_NAME
     elif use_input_image:
@@ -143,7 +148,9 @@ def select_workflow_and_checkpoint(
     return workflow_dir() / sdxl_workflow_name, checkpoint_path, "sdxl"
 
 
-def validate_checkpoint_preflight(checkpoint_path: Path | None) -> tuple[str | None, str | None]:
+def validate_checkpoint_preflight(
+    checkpoint_path: Path | None,
+) -> tuple[str | None, str | None]:
     if checkpoint_path is None:
         return "missing_checkpoint", "missing_checkpoint"
     if not checkpoint_path.exists() or not checkpoint_path.is_file():
@@ -159,7 +166,9 @@ def normalize_denoise_strength(value: float) -> float:
     return max(MIN_DENOISE_STRENGTH, min(MAX_DENOISE_STRENGTH, float(value)))
 
 
-def validate_input_image_preflight(input_image_path: Path | None) -> tuple[str | None, str | None]:
+def validate_input_image_preflight(
+    input_image_path: Path | None,
+) -> tuple[str | None, str | None]:
     if input_image_path is None:
         return "invalid_request", "missing_input_image"
     if not input_image_path.exists() or not input_image_path.is_file():
@@ -171,7 +180,9 @@ def validate_input_image_preflight(input_image_path: Path | None) -> tuple[str |
     return None, None
 
 
-def validate_mask_image_preflight(mask_image_path: Path | None) -> tuple[str | None, str | None]:
+def validate_mask_image_preflight(
+    mask_image_path: Path | None,
+) -> tuple[str | None, str | None]:
     if mask_image_path is None:
         return "invalid_request", "missing_mask_image"
     if not mask_image_path.exists() or not mask_image_path.is_file():
@@ -211,11 +222,14 @@ def stage_mask_image_for_comfy(mask_image_path: Path) -> str:
     return stage_image_for_comfy(mask_image_path, subfolder="mask")
 
 
-def ensure_image_sizes_match(source_image_path: Path, mask_image_path: Path) -> tuple[str | None, str | None]:
+def ensure_image_sizes_match(
+    source_image_path: Path, mask_image_path: Path
+) -> tuple[str | None, str | None]:
     source_path = source_image_path.resolve()
     mask_path = mask_image_path.resolve()
     try:
         from PIL import Image
+
         with Image.open(source_path) as source_image:
             source_image.load()
             source_size = source_image.size
@@ -269,9 +283,17 @@ def mutate_workflow(
         if class_type == "CheckpointLoaderSimple" and checkpoint_name:
             inputs["ckpt_name"] = checkpoint_name
 
-        if class_type == "LoadImage" and input_image_name and isinstance(inputs.get("image"), str):
+        if (
+            class_type == "LoadImage"
+            and input_image_name
+            and isinstance(inputs.get("image"), str)
+        ):
             inputs["image"] = input_image_name
-        if class_type == "LoadImageMask" and mask_image_name and isinstance(inputs.get("image"), str):
+        if (
+            class_type == "LoadImageMask"
+            and mask_image_name
+            and isinstance(inputs.get("image"), str)
+        ):
             inputs["image"] = mask_image_name
 
         if class_type == "SaveImage" and isinstance(inputs.get("filename_prefix"), str):
@@ -283,9 +305,17 @@ def mutate_workflow(
             inputs["steps"] = steps
         if "cfg" in inputs and isinstance(inputs.get("cfg"), (int, float)):
             inputs["cfg"] = cfg
-        if denoise_strength is not None and "denoise" in inputs and isinstance(inputs.get("denoise"), (int, float)):
+        if (
+            denoise_strength is not None
+            and "denoise" in inputs
+            and isinstance(inputs.get("denoise"), (int, float))
+        ):
             inputs["denoise"] = denoise_strength
-        if grow_mask_by_override is not None and "grow_mask_by" in inputs and isinstance(inputs.get("grow_mask_by"), (int, float)):
+        if (
+            grow_mask_by_override is not None
+            and "grow_mask_by" in inputs
+            and isinstance(inputs.get("grow_mask_by"), (int, float))
+        ):
             inputs["grow_mask_by"] = max(0, int(grow_mask_by_override))
         if "width" in inputs and isinstance(inputs.get("width"), (int, float)):
             inputs["width"] = width
@@ -478,7 +508,9 @@ def run_render(
     logger: Callable[[str], None] | None = None,
     error_logger: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    resolved_output_dir = output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    resolved_output_dir = (
+        output_dir.resolve() if output_dir is not None else comfy_output_dir().resolve()
+    )
     seed_value = seed if seed >= 0 else random.randint(0, 2**31 - 1)
     prompt_id: str | None = None
     output_file: str | None = None
@@ -510,8 +542,12 @@ def run_render(
                 )
 
         if use_input_image or use_inpainting:
-            resolved_input_image_path = input_image_path.resolve() if input_image_path is not None else None
-            input_error_type, input_blocker = validate_input_image_preflight(resolved_input_image_path)
+            resolved_input_image_path = (
+                input_image_path.resolve() if input_image_path is not None else None
+            )
+            input_error_type, input_blocker = validate_input_image_preflight(
+                resolved_input_image_path
+            )
             if input_error_type is not None:
                 return {
                     "status": "error",
@@ -521,11 +557,17 @@ def run_render(
                     "error_type": input_error_type,
                     "blocker": input_blocker,
                 }
-            staged_input_image_name = stage_input_image_for_comfy(resolved_input_image_path)
+            staged_input_image_name = stage_input_image_for_comfy(
+                resolved_input_image_path
+            )
 
         if use_inpainting:
-            resolved_mask_image_path = mask_image_path.resolve() if mask_image_path is not None else None
-            mask_error_type, mask_blocker = validate_mask_image_preflight(resolved_mask_image_path)
+            resolved_mask_image_path = (
+                mask_image_path.resolve() if mask_image_path is not None else None
+            )
+            mask_error_type, mask_blocker = validate_mask_image_preflight(
+                resolved_mask_image_path
+            )
             if mask_error_type is not None:
                 return {
                     "status": "error",
@@ -544,7 +586,9 @@ def run_render(
                     "error_type": "invalid_request",
                     "blocker": "missing_input_image",
                 }
-            size_error_type, size_blocker = ensure_image_sizes_match(resolved_input_image_path, resolved_mask_image_path)
+            size_error_type, size_blocker = ensure_image_sizes_match(
+                resolved_input_image_path, resolved_mask_image_path
+            )
             if size_error_type is not None:
                 return {
                     "status": "error",
@@ -554,7 +598,9 @@ def run_render(
                     "error_type": size_error_type,
                     "blocker": size_blocker,
                 }
-            staged_mask_image_name = stage_mask_image_for_comfy(resolved_mask_image_path)
+            staged_mask_image_name = stage_mask_image_for_comfy(
+                resolved_mask_image_path
+            )
 
         workflow_payload = load_workflow(workflow_path)
         queued_prompt = mutate_workflow(
@@ -568,7 +614,11 @@ def run_render(
             height=height,
             checkpoint_name=checkpoint_path.name if checkpoint_path else None,
             job_suffix=str(seed_value),
-            denoise_strength=normalize_denoise_strength(denoise_strength) if (use_input_image or use_inpainting) else None,
+            denoise_strength=(
+                normalize_denoise_strength(denoise_strength)
+                if (use_input_image or use_inpainting)
+                else None
+            ),
             input_image_name=staged_input_image_name,
             mask_image_name=staged_mask_image_name,
             grow_mask_by_override=grow_mask_by_override if use_inpainting else None,
@@ -578,7 +628,10 @@ def run_render(
         response = client.queue_prompt(queued_prompt)
         prompt_id = response.get("prompt_id")
         if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyClientError("ComfyUI queue response did not include prompt_id.", error_type="api_error")
+            raise ComfyClientError(
+                "ComfyUI queue response did not include prompt_id.",
+                error_type="api_error",
+            )
 
         log_run_context(
             logger=logger,
@@ -593,13 +646,17 @@ def run_render(
 
         node_errors = response.get("node_errors")
         if isinstance(node_errors, dict) and node_errors:
-            error_text = build_error_text("queue node errors", {"node_errors": node_errors})
+            error_text = build_error_text(
+                "queue node errors", {"node_errors": node_errors}
+            )
             error_type = classify_error_type(
                 error_text=error_text,
                 payload={"node_errors": node_errors},
                 mode=resolved_mode,
             )
-            return build_error_payload(mode=resolved_mode, prompt_id=prompt_id, error_type=error_type)
+            return build_error_payload(
+                mode=resolved_mode, prompt_id=prompt_id, error_type=error_type
+            )
 
         if wait and not queue_only:
             prompt_result = client.wait_for_prompt_result(
@@ -618,16 +675,23 @@ def run_render(
                     payload=prompt_result["history"],
                     mode=resolved_mode,
                 )
-                return build_error_payload(mode=resolved_mode, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=resolved_mode, prompt_id=prompt_id, error_type=error_type
+                )
 
             status_str = prompt_result.get("status_str")
-            if isinstance(status_str, str) and status_str.lower() not in SUCCESS_STATUS_VALUES:
+            if (
+                isinstance(status_str, str)
+                and status_str.lower() not in SUCCESS_STATUS_VALUES
+            ):
                 error_type = classify_error_type(
                     error_text=f"execution status {status_str}",
                     payload=prompt_result["history"],
                     mode=resolved_mode,
                 )
-                return build_error_payload(mode=resolved_mode, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=resolved_mode, prompt_id=prompt_id, error_type=error_type
+                )
 
             resolved_output = prompt_result.get("output_file")
             if isinstance(resolved_output, str) and resolved_output:
@@ -645,7 +709,9 @@ def run_render(
                     payload=prompt_result["history"],
                     mode=resolved_mode,
                 )
-                return build_error_payload(mode=resolved_mode, prompt_id=prompt_id, error_type=error_type)
+                return build_error_payload(
+                    mode=resolved_mode, prompt_id=prompt_id, error_type=error_type
+                )
 
         return build_success_payload(
             mode=resolved_mode,
@@ -664,32 +730,113 @@ def run_render(
             error_type = "timeout"
         if error_logger is not None:
             error_logger(f"ERROR: {error_text}")
-        return build_error_payload(mode=resolved_mode or mode, prompt_id=prompt_id, error_type=error_type)
+        return build_error_payload(
+            mode=resolved_mode or mode, prompt_id=prompt_id, error_type=error_type
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Render a text-to-image job via local ComfyUI.")
-    parser.add_argument("--workflow", help="Optional workflow file name or JSON path. Default is auto-selection.")
-    parser.add_argument("--checkpoint", help="Explicit checkpoint filename or relative path inside models/checkpoints.")
-    parser.add_argument("--mode", choices=("auto", "sdxl", "placeholder"), default="auto", help="Render mode.")
+    parser = argparse.ArgumentParser(
+        description="Render a text-to-image job via local ComfyUI."
+    )
+    parser.add_argument(
+        "--workflow",
+        help="Optional workflow file name or JSON path. Default is auto-selection.",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        help="Explicit checkpoint filename or relative path inside models/checkpoints.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("auto", "sdxl", "placeholder"),
+        default="auto",
+        help="Render mode.",
+    )
     parser.add_argument("--prompt", required=True, help="Positive prompt text.")
-    parser.add_argument("--negative-prompt", default=DEFAULT_NEGATIVE_PROMPT, help="Negative prompt text.")
-    parser.add_argument("--seed", type=int, default=-1, help="Seed value. -1 picks a random 32-bit seed.")
-    parser.add_argument("--steps", type=int, default=DEFAULT_STEPS, help="Sampling steps to inject when supported.")
-    parser.add_argument("--cfg", type=float, default=DEFAULT_CFG, help="CFG scale to inject when supported.")
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH, help="Image width when supported.")
-    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT, help="Image height when supported.")
-    parser.add_argument("--use-input-image", action="store_true", help="Use a staged input image for SDXL img2img.")
-    parser.add_argument("--input-image-path", type=Path, help="Path to the uploaded input image.")
-    parser.add_argument("--use-inpainting", action="store_true", help="Use a staged input image and mask for SDXL inpainting.")
-    parser.add_argument("--mask-image-path", type=Path, help="Path to the uploaded mask image.")
-    parser.add_argument("--denoise-strength", type=float, default=DEFAULT_DENOISE_STRENGTH, help="Img2img denoise strength.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL.")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_REQUEST_TIMEOUT, help="Per-request timeout in seconds.")
-    parser.add_argument("--wait", action="store_true", help="Wait for completion and output file.")
-    parser.add_argument("--wait-timeout", type=int, default=DEFAULT_WAIT_TIMEOUT, help="Timeout for waiting on completion or output.")
-    parser.add_argument("--output-dir", type=Path, default=comfy_output_dir(), help="ComfyUI output directory.")
-    parser.add_argument("--queue-only", action="store_true", help="Queue only and skip waiting for execution or output.")
+    parser.add_argument(
+        "--negative-prompt",
+        default=DEFAULT_NEGATIVE_PROMPT,
+        help="Negative prompt text.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=-1,
+        help="Seed value. -1 picks a random 32-bit seed.",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=DEFAULT_STEPS,
+        help="Sampling steps to inject when supported.",
+    )
+    parser.add_argument(
+        "--cfg",
+        type=float,
+        default=DEFAULT_CFG,
+        help="CFG scale to inject when supported.",
+    )
+    parser.add_argument(
+        "--width", type=int, default=DEFAULT_WIDTH, help="Image width when supported."
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=DEFAULT_HEIGHT,
+        help="Image height when supported.",
+    )
+    parser.add_argument(
+        "--use-input-image",
+        action="store_true",
+        help="Use a staged input image for SDXL img2img.",
+    )
+    parser.add_argument(
+        "--input-image-path", type=Path, help="Path to the uploaded input image."
+    )
+    parser.add_argument(
+        "--use-inpainting",
+        action="store_true",
+        help="Use a staged input image and mask for SDXL inpainting.",
+    )
+    parser.add_argument(
+        "--mask-image-path", type=Path, help="Path to the uploaded mask image."
+    )
+    parser.add_argument(
+        "--denoise-strength",
+        type=float,
+        default=DEFAULT_DENOISE_STRENGTH,
+        help="Img2img denoise strength.",
+    )
+    parser.add_argument(
+        "--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL."
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_REQUEST_TIMEOUT,
+        help="Per-request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--wait", action="store_true", help="Wait for completion and output file."
+    )
+    parser.add_argument(
+        "--wait-timeout",
+        type=int,
+        default=DEFAULT_WAIT_TIMEOUT,
+        help="Timeout for waiting on completion or output.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=comfy_output_dir(),
+        help="ComfyUI output directory.",
+    )
+    parser.add_argument(
+        "--queue-only",
+        action="store_true",
+        help="Queue only and skip waiting for execution or output.",
+    )
     return parser
 
 

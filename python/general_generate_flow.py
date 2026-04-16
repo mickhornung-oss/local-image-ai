@@ -45,7 +45,9 @@ def prepare_general_generate_request(
             blocker="empty_prompt",
         )
 
-    negative_prompt, negative_prompt_error = normalize_negative_prompt(payload_dict.get("negative_prompt"))
+    negative_prompt, negative_prompt_error = normalize_negative_prompt(
+        payload_dict.get("negative_prompt")
+    )
     if negative_prompt_error is not None:
         return None, _error(
             HTTPStatus.BAD_REQUEST,
@@ -93,7 +95,9 @@ def prepare_general_generate_request(
     input_image_path = None
     if use_input_image or use_inpainting:
         try:
-            _, input_image_path = resolve_requested_input_image(payload_dict.get("input_image_id"))
+            _, input_image_path = resolve_requested_input_image(
+                payload_dict.get("input_image_id")
+            )
         except ValueError as exc:
             return None, _error(
                 HTTPStatus.BAD_REQUEST,
@@ -105,7 +109,9 @@ def prepare_general_generate_request(
     inpaint_tuning = None
     if use_inpainting:
         try:
-            _, mask_image_path = resolve_requested_mask_image(payload_dict.get("mask_image_id"))
+            _, mask_image_path = resolve_requested_mask_image(
+                payload_dict.get("mask_image_id")
+            )
         except ValueError as exc:
             return None, _error(
                 HTTPStatus.BAD_REQUEST,
@@ -138,10 +144,16 @@ def prepare_general_generate_request(
     }, None
 
 
-def build_general_generate_system_failure(system_state: Mapping[str, object] | None) -> dict | None:
+def build_general_generate_system_failure(
+    system_state: Mapping[str, object] | None,
+) -> dict | None:
     state = system_state if isinstance(system_state, Mapping) else {}
     if state.get("comfyui_reachable") is not True:
-        blocker = "runner_state_invalid" if state.get("runner_error") == "runner_state_invalid" else "comfyui_unreachable"
+        blocker = (
+            "runner_state_invalid"
+            if state.get("runner_error") == "runner_state_invalid"
+            else "comfyui_unreachable"
+        )
         return _error(
             HTTPStatus.SERVICE_UNAVAILABLE,
             error_type="api_error",
@@ -163,7 +175,11 @@ def build_general_render_request(
     resolve_render_prompt: Callable[..., str],
     inpaint_locality_negative_suffix: str,
 ) -> dict:
-    inpaint_tuning = prepared.get("inpaint_tuning") if isinstance(prepared.get("inpaint_tuning"), Mapping) else None
+    inpaint_tuning = (
+        prepared.get("inpaint_tuning")
+        if isinstance(prepared.get("inpaint_tuning"), Mapping)
+        else None
+    )
     checkpoint = prepared.get("checkpoint")
     negative_prompt = prepared.get("negative_prompt")
     use_inpainting = prepared.get("use_inpainting") is True
@@ -175,8 +191,12 @@ def build_general_render_request(
         use_inpainting=use_inpainting,
         use_edit_image=use_edit_image,
         extra_negative_prompt=negative_prompt,
-        cfg_override=inpaint_tuning.get("cfg") if isinstance(inpaint_tuning, Mapping) else None,
-        steps_override=inpaint_tuning.get("steps") if isinstance(inpaint_tuning, Mapping) else None,
+        cfg_override=(
+            inpaint_tuning.get("cfg") if isinstance(inpaint_tuning, Mapping) else None
+        ),
+        steps_override=(
+            inpaint_tuning.get("steps") if isinstance(inpaint_tuning, Mapping) else None
+        ),
         inpaint_negative_suffix=(
             f"{inpaint_locality_negative_suffix}, {inpaint_tuning.get('negative_suffix')}"
             if isinstance(inpaint_tuning, Mapping)
@@ -189,7 +209,11 @@ def build_general_render_request(
         prompt_text,
         use_inpainting=use_inpainting,
         use_edit_image=use_edit_image,
-        inpaint_prompt_suffix=inpaint_tuning.get("prompt_suffix") if isinstance(inpaint_tuning, Mapping) else None,
+        inpaint_prompt_suffix=(
+            inpaint_tuning.get("prompt_suffix")
+            if isinstance(inpaint_tuning, Mapping)
+            else None
+        ),
     )
 
     return {
@@ -199,6 +223,8 @@ def build_general_render_request(
         "steps_value": steps_value,
         "negative_prompt_value": negative_prompt_value,
         "grow_mask_by_override": (
-            inpaint_tuning.get("grow_mask_by") if isinstance(inpaint_tuning, Mapping) else None
+            inpaint_tuning.get("grow_mask_by")
+            if isinstance(inpaint_tuning, Mapping)
+            else None
         ),
     }

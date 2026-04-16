@@ -11,7 +11,9 @@ def _optional_text(value: object) -> str | None:
     return normalized or None
 
 
-def resolve_text_chat_profile_id(slot: Mapping[str, object] | None, *, default_profile_id: str) -> str:
+def resolve_text_chat_profile_id(
+    slot: Mapping[str, object] | None, *, default_profile_id: str
+) -> str:
     if isinstance(slot, Mapping):
         profile_id = _optional_text(slot.get("model_profile"))
         if profile_id:
@@ -51,9 +53,13 @@ def prepare_text_chat_service_request(
     )
     summary = _optional_text(slot_data.get("summary"))
     return {
-        "current_title": requested_title or _optional_text(slot_data.get("title")) or default_title,
+        "current_title": requested_title
+        or _optional_text(slot_data.get("title"))
+        or default_title,
         "inferred_language": infer_language(prompt),
-        "profile_id": resolve_text_chat_profile_id(slot_data, default_profile_id=default_profile_id),
+        "profile_id": resolve_text_chat_profile_id(
+            slot_data, default_profile_id=default_profile_id
+        ),
         "recent_messages": recent_messages,
         "summary": summary,
         "composed_prompt": compose_prompt(
@@ -75,11 +81,13 @@ def execute_text_chat_service_request(
     summary: str | None,
     recent_messages: list[dict],
 ) -> dict:
-    response_payload, response_error, response_status, service_name, model_status = request_callable(
-        composed_prompt,
-        mode=mode,
-        summary=summary,
-        recent_messages=recent_messages,
+    response_payload, response_error, response_status, service_name, model_status = (
+        request_callable(
+            composed_prompt,
+            mode=mode,
+            summary=summary,
+            recent_messages=recent_messages,
+        )
     )
     if retry_predicate(
         switch_result=switch_result,
@@ -87,7 +95,13 @@ def execute_text_chat_service_request(
         response_status=response_status,
     ):
         sleep_callable(5.0)
-        response_payload, response_error, response_status, service_name, model_status = request_callable(
+        (
+            response_payload,
+            response_error,
+            response_status,
+            service_name,
+            model_status,
+        ) = request_callable(
             composed_prompt,
             mode=mode,
             summary=summary,
@@ -111,7 +125,11 @@ def normalize_text_chat_service_result(
     model_status: object,
 ) -> dict:
     if response_error is not None or response_status is None:
-        blocker = "text_service_unreachable" if response_error in {"unreachable", "timeout"} else "text_service_invalid_response"
+        blocker = (
+            "text_service_unreachable"
+            if response_error in {"unreachable", "timeout"}
+            else "text_service_invalid_response"
+        )
         return {
             "ok": False,
             "http_status": HTTPStatus.SERVICE_UNAVAILABLE,
@@ -119,10 +137,20 @@ def normalize_text_chat_service_result(
             "message": "Text-KI ist aktuell nicht erreichbar.",
         }
 
-    if response_status != HTTPStatus.OK or not isinstance(response_payload, dict) or response_payload.get("ok") is not True:
-        error_value = str(
-            response_payload.get("blocker") or response_payload.get("error_type") or "text_service_request_failed"
-        ) if isinstance(response_payload, Mapping) else "text_service_request_failed"
+    if (
+        response_status != HTTPStatus.OK
+        or not isinstance(response_payload, dict)
+        or response_payload.get("ok") is not True
+    ):
+        error_value = (
+            str(
+                response_payload.get("blocker")
+                or response_payload.get("error_type")
+                or "text_service_request_failed"
+            )
+            if isinstance(response_payload, Mapping)
+            else "text_service_request_failed"
+        )
         error_message = (
             str(response_payload.get("message")).strip()
             if isinstance(response_payload, Mapping)
@@ -137,7 +165,11 @@ def normalize_text_chat_service_result(
             "message": error_message,
         }
 
-    response_text = response_payload.get("response_text") if isinstance(response_payload, Mapping) else None
+    response_text = (
+        response_payload.get("response_text")
+        if isinstance(response_payload, Mapping)
+        else None
+    )
     if not isinstance(response_text, str) or not response_text.strip():
         return {
             "ok": False,

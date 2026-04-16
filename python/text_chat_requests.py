@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Callable
 
-
 TEXT_CHAT_SLOT_ACTIONS = frozenset(
     {"activate", "rename", "clear", "replace", "profile", "message"}
 )
@@ -16,7 +15,9 @@ def coerce_optional_text_chat_payload(payload: object) -> tuple[dict, str | None
     return payload, None
 
 
-def coerce_required_text_chat_payload(payload: object) -> tuple[dict | None, str | None]:
+def coerce_required_text_chat_payload(
+    payload: object,
+) -> tuple[dict | None, str | None]:
     if payload is None or not isinstance(payload, dict):
         return None, "invalid_json"
     return payload, None
@@ -31,7 +32,7 @@ def resolve_text_chat_slot_request_path(
     prefix = f"{slots_path}/slot/"
     if not request_path.startswith(prefix):
         return None
-    suffix = request_path[len(prefix):].strip("/")
+    suffix = request_path[len(prefix) :].strip("/")
     if not suffix:
         return None
     parts = suffix.split("/")

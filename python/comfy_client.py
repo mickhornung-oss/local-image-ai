@@ -7,7 +7,6 @@ from typing import Any
 
 import requests
 
-
 DEFAULT_BASE_URL = "http://127.0.0.1:8188"
 DEFAULT_POLL_INTERVAL = 1.0
 IMAGE_OUTPUT_KEYS = ("images",)
@@ -35,7 +34,9 @@ class ComfyClient:
     def health_check(self) -> dict[str, Any]:
         return self._request_json("GET", "/system_stats")
 
-    def queue_prompt(self, prompt: dict[str, Any], client_id: str | None = None) -> dict[str, Any]:
+    def queue_prompt(
+        self, prompt: dict[str, Any], client_id: str | None = None
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {"prompt": prompt}
         if client_id:
             payload["client_id"] = client_id
@@ -53,7 +54,9 @@ class ComfyClient:
         if entry is None:
             return None
         if not isinstance(entry, dict):
-            raise ComfyClientError("Unexpected prompt history entry received from ComfyUI.")
+            raise ComfyClientError(
+                "Unexpected prompt history entry received from ComfyUI."
+            )
         return entry
 
     def wait_for_prompt_result(
@@ -167,14 +170,22 @@ class ComfyClient:
                     continue
                 details = message[1]
                 if isinstance(details, dict):
-                    for key in ("exception_message", "error", "message", "exception_type"):
+                    for key in (
+                        "exception_message",
+                        "error",
+                        "message",
+                        "exception_type",
+                    ):
                         value = details.get(key)
                         if isinstance(value, str) and value:
                             return value
                 return str(message_type)
 
         status_str = status.get("status_str")
-        if isinstance(status_str, str) and status_str.lower() not in {"success", "completed"}:
+        if isinstance(status_str, str) and status_str.lower() not in {
+            "success",
+            "completed",
+        }:
             return f"execution status {status_str}"
 
         return None
@@ -205,7 +216,9 @@ class ComfyClient:
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         try:
-            response = requests.request(method, url, json=json_payload, timeout=self.timeout)
+            response = requests.request(
+                method, url, json=json_payload, timeout=self.timeout
+            )
         except requests.ConnectionError as exc:
             raise ComfyClientError(
                 f"Could not connect to ComfyUI at {self.base_url}. Is scripts/run_comfyui.ps1 running?",
@@ -217,7 +230,9 @@ class ComfyClient:
                 error_type="timeout",
             ) from exc
         except requests.RequestException as exc:
-            raise ComfyClientError(f"HTTP request to {url} failed: {exc}", error_type="api_error") from exc
+            raise ComfyClientError(
+                f"HTTP request to {url} failed: {exc}", error_type="api_error"
+            ) from exc
 
         payload: dict[str, Any] | None = None
         try:
@@ -261,18 +276,34 @@ def _load_prompt_file(path: Path) -> dict[str, Any]:
         raise ComfyClientError(f"Invalid JSON in workflow file {path}: {exc}") from exc
 
     if not isinstance(payload, dict):
-        raise ComfyClientError(f"Workflow file {path} must contain a JSON object at the top level.")
+        raise ComfyClientError(
+            f"Workflow file {path} must contain a JSON object at the top level."
+        )
     return payload
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Queue an API workflow against a local ComfyUI instance.")
-    parser.add_argument("workflow", type=Path, help="Path to an API-format workflow JSON file.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL.")
-    parser.add_argument("--timeout", type=int, default=30, help="Per-request timeout in seconds.")
-    parser.add_argument("--wait", action="store_true", help="Wait for prompt completion.")
-    parser.add_argument("--output-dir", type=Path, help="Output directory for output path resolution.")
-    parser.add_argument("--wait-timeout", type=int, default=180, help="Timeout for --wait.")
+    parser = argparse.ArgumentParser(
+        description="Queue an API workflow against a local ComfyUI instance."
+    )
+    parser.add_argument(
+        "workflow", type=Path, help="Path to an API-format workflow JSON file."
+    )
+    parser.add_argument(
+        "--base-url", default=DEFAULT_BASE_URL, help="ComfyUI base URL."
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=30, help="Per-request timeout in seconds."
+    )
+    parser.add_argument(
+        "--wait", action="store_true", help="Wait for prompt completion."
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, help="Output directory for output path resolution."
+    )
+    parser.add_argument(
+        "--wait-timeout", type=int, default=180, help="Timeout for --wait."
+    )
     return parser
 
 

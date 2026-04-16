@@ -4,7 +4,6 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
-
 IDENTITY_TRANSFER_ROLES = (
     "identity_head_reference",
     "target_body_image",
@@ -16,7 +15,9 @@ IDENTITY_TRANSFER_REQUIRED_ROLES = (
     "target_body_image",
 )
 IDENTITY_TRANSFER_OPTIONAL_ROLES = tuple(
-    role for role in IDENTITY_TRANSFER_ROLES if role not in IDENTITY_TRANSFER_REQUIRED_ROLES
+    role
+    for role in IDENTITY_TRANSFER_ROLES
+    if role not in IDENTITY_TRANSFER_REQUIRED_ROLES
 )
 VALID_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 VALID_UPLOAD_FORMATS = {
@@ -44,10 +45,16 @@ def repo_root() -> Path:
 
 
 def identity_transfer_root(*, root_override: Path | None = None) -> Path:
-    return root_override.resolve() if root_override is not None else (repo_root() / "data" / "identity_transfer_roles").resolve()
+    return (
+        root_override.resolve()
+        if root_override is not None
+        else (repo_root() / "data" / "identity_transfer_roles").resolve()
+    )
 
 
-def identity_transfer_role_root(role: str, *, root_override: Path | None = None) -> Path:
+def identity_transfer_role_root(
+    role: str, *, root_override: Path | None = None
+) -> Path:
     return (identity_transfer_root(root_override=root_override) / role).resolve()
 
 
@@ -71,7 +78,11 @@ def read_json_file(path: Path) -> dict | None:
 
 
 def inspect_transfer_image(path: Path) -> dict[str, Any] | None:
-    if not path.exists() or not path.is_file() or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS:
+    if (
+        not path.exists()
+        or not path.is_file()
+        or path.suffix.lower() not in VALID_UPLOAD_EXTENSIONS
+    ):
         return None
     try:
         with Image.open(path) as image:
@@ -95,7 +106,9 @@ def inspect_transfer_image(path: Path) -> dict[str, Any] | None:
     }
 
 
-def build_role_record(image_path: Path, metadata: dict, role: str) -> tuple[dict[str, Any] | None, list[str]]:
+def build_role_record(
+    image_path: Path, metadata: dict, role: str
+) -> tuple[dict[str, Any] | None, list[str]]:
     blockers: list[str] = []
     image_info = inspect_transfer_image(image_path)
     if image_info is None:
@@ -166,12 +179,17 @@ def derive_error_state(blockers: list[str]) -> tuple[str, str | None, str | None
         "missing_identity_head_reference",
         "missing_target_body_image",
     ]
-    selected_blocker = next((blocker for blocker in prioritized_blockers if blocker in blockers), blockers[0])
+    selected_blocker = next(
+        (blocker for blocker in prioritized_blockers if blocker in blockers),
+        blockers[0],
+    )
     status = "ok" if set(blockers).issubset(READINESS_ONLY_BLOCKERS) else "error"
     return status, selected_blocker, BLOCKER_ERROR_MESSAGES.get(selected_blocker)
 
 
-def build_identity_transfer_adapter_state(*, root_override: Path | None = None) -> dict[str, Any]:
+def build_identity_transfer_adapter_state(
+    *, root_override: Path | None = None
+) -> dict[str, Any]:
     root = identity_transfer_root(root_override=root_override)
     try:
         root.mkdir(parents=True, exist_ok=True)
@@ -180,8 +198,12 @@ def build_identity_transfer_adapter_state(*, root_override: Path | None = None) 
             "status": "error",
             "ready": False,
             "roles": {role: None for role in IDENTITY_TRANSFER_ROLES},
-            "required_roles_present": {role: False for role in IDENTITY_TRANSFER_REQUIRED_ROLES},
-            "optional_roles_present": {role: False for role in IDENTITY_TRANSFER_OPTIONAL_ROLES},
+            "required_roles_present": {
+                role: False for role in IDENTITY_TRANSFER_REQUIRED_ROLES
+            },
+            "optional_roles_present": {
+                role: False for role in IDENTITY_TRANSFER_OPTIONAL_ROLES
+            },
             "occupied_role_count": 0,
             "ordered_roles": [],
             "blockers": ["identity_transfer_store_unavailable"],
@@ -201,11 +223,13 @@ def build_identity_transfer_adapter_state(*, root_override: Path | None = None) 
         try:
             role_root.mkdir(parents=True, exist_ok=True)
             image_paths = sorted(
-                path for path in role_root.iterdir()
+                path
+                for path in role_root.iterdir()
                 if path.is_file() and path.suffix.lower() in VALID_UPLOAD_EXTENSIONS
             )
             metadata_paths = sorted(
-                path for path in role_root.iterdir()
+                path
+                for path in role_root.iterdir()
                 if path.is_file() and path.suffix.lower() == ".json"
             )
         except OSError:
@@ -236,7 +260,9 @@ def build_identity_transfer_adapter_state(*, root_override: Path | None = None) 
             if metadata is None:
                 role_blockers.append("invalid_identity_transfer_metadata")
             else:
-                role_record, record_blockers = build_role_record(image_path, metadata, role)
+                role_record, record_blockers = build_role_record(
+                    image_path, metadata, role
+                )
                 if role_record is None:
                     role_blockers.extend(record_blockers)
                 else:
@@ -261,10 +287,12 @@ def build_identity_transfer_adapter_state(*, root_override: Path | None = None) 
         )
 
     required_roles_present = {
-        role: isinstance(roles.get(role), dict) for role in IDENTITY_TRANSFER_REQUIRED_ROLES
+        role: isinstance(roles.get(role), dict)
+        for role in IDENTITY_TRANSFER_REQUIRED_ROLES
     }
     optional_roles_present = {
-        role: isinstance(roles.get(role), dict) for role in IDENTITY_TRANSFER_OPTIONAL_ROLES
+        role: isinstance(roles.get(role), dict)
+        for role in IDENTITY_TRANSFER_OPTIONAL_ROLES
     }
     blockers = sorted(set(blockers))
     status, error_type, error_message = derive_error_state(blockers)

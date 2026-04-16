@@ -39,7 +39,9 @@ def resolve_identity_multi_reference_status_code(
     return reference_status_resolver(error_type=error_type, blocker=blocker)
 
 
-def resolve_identity_transfer_status_code(*, error_type: str | None, blocker: str | None) -> HTTPStatus:
+def resolve_identity_transfer_status_code(
+    *, error_type: str | None, blocker: str | None
+) -> HTTPStatus:
     if blocker in {"missing_identity_head_reference", "missing_target_body_image"}:
         return HTTPStatus.BAD_REQUEST
     if blocker in {
@@ -80,7 +82,9 @@ def resolve_identity_readiness_http_status(
     state = readiness_state if isinstance(readiness_state, Mapping) else {}
     if state.get("ok") is True:
         return HTTPStatus.OK
-    error_type = state.get("error_type") if isinstance(state.get("error_type"), str) else None
+    error_type = (
+        state.get("error_type") if isinstance(state.get("error_type"), str) else None
+    )
     blocker = state.get("blocker") if isinstance(state.get("blocker"), str) else None
     return status_code_resolver(error_type=error_type, blocker=blocker)
 
@@ -113,7 +117,11 @@ def build_identity_transfer_status_payload(
                 "required": required,
                 "occupied": occupied,
                 "dir_accessible": dir_accessible,
-                "dir_error": None if dir_accessible else (dir_error or f"{role}_dir_not_accessible"),
+                "dir_error": (
+                    None
+                    if dir_accessible
+                    else (dir_error or f"{role}_dir_not_accessible")
+                ),
                 "image": current_item,
             }
         )

@@ -35,7 +35,9 @@ def dir_access_state(
     return True, None
 
 
-def resolve_internal_output_path(output_file: str | Path | None, *, output_root: Path) -> tuple[Path | None, str | None]:
+def resolve_internal_output_path(
+    output_file: str | Path | None, *, output_root: Path
+) -> tuple[Path | None, str | None]:
     if output_file is None:
         return None, "generated_file_not_accessible"
 
@@ -68,13 +70,17 @@ def path_to_web_path(path: Path, *, root: Path, route_prefix: str) -> str:
     return f"{route_prefix}{encoded}"
 
 
-def identity_transfer_path_to_web_path(path: Path, *, role: str, role_root: Path, route_prefix: str) -> str:
+def identity_transfer_path_to_web_path(
+    path: Path, *, role: str, role_root: Path, route_prefix: str
+) -> str:
     relative = path.relative_to(role_root)
     encoded = "/".join(quote(part) for part in relative.parts)
     return f"{route_prefix}{quote(role)}/{encoded}"
 
 
-def resolve_request_path(request_path: str, *, route_prefix: str, root: Path) -> Path | None:
+def resolve_request_path(
+    request_path: str, *, route_prefix: str, root: Path
+) -> Path | None:
     if not request_path.startswith(route_prefix):
         return None
 
@@ -102,7 +108,9 @@ def resolve_request_path(request_path: str, *, route_prefix: str, root: Path) ->
     return candidate
 
 
-def resolve_multi_reference_request_path(request_path: str, *, route_prefix: str, root: Path) -> Path | None:
+def resolve_multi_reference_request_path(
+    request_path: str, *, route_prefix: str, root: Path
+) -> Path | None:
     if not request_path.startswith(route_prefix):
         return None
 
@@ -111,7 +119,9 @@ def resolve_multi_reference_request_path(request_path: str, *, route_prefix: str
         return None
 
     normalized_parts = PurePosixPath(relative).parts
-    if not normalized_parts or any(part in {"", ".", ".."} for part in normalized_parts):
+    if not normalized_parts or any(
+        part in {"", ".", ".."} for part in normalized_parts
+    ):
         return None
 
     candidate = (root / Path(*normalized_parts)).resolve()
@@ -161,7 +171,9 @@ def resolve_identity_transfer_role_request_path(
     return candidate
 
 
-def resolve_result_download_request_id(request_path: str, *, route_prefix: str) -> str | None:
+def resolve_result_download_request_id(
+    request_path: str, *, route_prefix: str
+) -> str | None:
     if not request_path.startswith(route_prefix):
         return None
 

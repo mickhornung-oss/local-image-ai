@@ -9,7 +9,6 @@ from pathlib import Path
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_URL = "http://127.0.0.1:8090"
 DEFAULT_SERIES_PATH = REPO_ROOT / "docs" / "identity_research_test_series_v1.json"
@@ -23,7 +22,9 @@ def utc_now_iso() -> str:
 
 
 def run_id_now() -> str:
-    return f"identity-research-run-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    return (
+        f"identity-research-run-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    )
 
 
 def http_json(
@@ -55,7 +56,9 @@ def load_series(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def resolve_reference_image_id(base_url: str, explicit_reference_image_id: str | None) -> tuple[str, dict]:
+def resolve_reference_image_id(
+    base_url: str, explicit_reference_image_id: str | None
+) -> tuple[str, dict]:
     if explicit_reference_image_id:
         status_code, health = http_json(f"{base_url.rstrip('/')}/health", timeout=60)
         if status_code != 200:
@@ -103,7 +106,9 @@ def build_report_markdown(manifest: dict) -> str:
         lines.append("")
         lines.append(f"- prompt: `{case['prompt']}`")
         for provider_result in case["results"]:
-            lines.append(f"- {provider_result['provider']}: status=`{provider_result['status']}` http=`{provider_result['http_status']}`")
+            lines.append(
+                f"- {provider_result['provider']}: status=`{provider_result['status']}` http=`{provider_result['http_status']}`"
+            )
             if provider_result.get("result_id"):
                 lines.append(f"  result_id: `{provider_result['result_id']}`")
             if provider_result.get("output_file"):
@@ -111,7 +116,9 @@ def build_report_markdown(manifest: dict) -> str:
             if provider_result.get("metadata_file"):
                 lines.append(f"  metadata_file: `{provider_result['metadata_file']}`")
             if provider_result.get("duration_seconds") is not None:
-                lines.append(f"  duration_seconds: `{provider_result['duration_seconds']}`")
+                lines.append(
+                    f"  duration_seconds: `{provider_result['duration_seconds']}`"
+                )
             if provider_result.get("blocker"):
                 lines.append(f"  blocker: `{provider_result['blocker']}`")
         lines.append("")
@@ -127,7 +134,9 @@ def build_report_markdown(manifest: dict) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a small A/B identity research comparison on the isolated experimental endpoint.")
+    parser = argparse.ArgumentParser(
+        description="Run a small A/B identity research comparison on the isolated experimental endpoint."
+    )
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--series-file", type=Path, default=DEFAULT_SERIES_PATH)
     parser.add_argument("--reference-image-id")
@@ -135,20 +144,41 @@ def main() -> int:
     parser.add_argument("--providers", nargs="+", default=list(SUPPORTED_PROVIDERS))
     args = parser.parse_args()
 
-    providers = [str(provider).strip().lower() for provider in args.providers if str(provider).strip()]
+    providers = [
+        str(provider).strip().lower()
+        for provider in args.providers
+        if str(provider).strip()
+    ]
     if providers != list(SUPPORTED_PROVIDERS):
-        unknown = [provider for provider in providers if provider not in SUPPORTED_PROVIDERS]
+        unknown = [
+            provider for provider in providers if provider not in SUPPORTED_PROVIDERS
+        ]
         if unknown:
-            print(json.dumps({"status": "error", "blocker": "unsupported_identity_research_provider", "providers": unknown}, ensure_ascii=True))
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "blocker": "unsupported_identity_research_provider",
+                        "providers": unknown,
+                    },
+                    ensure_ascii=True,
+                )
+            )
             return 2
 
     series = load_series(args.series_file.resolve())
     cases = series.get("cases")
     if not isinstance(cases, list) or not cases:
-        print(json.dumps({"status": "error", "blocker": "invalid_test_series"}, ensure_ascii=True))
+        print(
+            json.dumps(
+                {"status": "error", "blocker": "invalid_test_series"}, ensure_ascii=True
+            )
+        )
         return 2
 
-    reference_image_id, health_payload = resolve_reference_image_id(args.base_url, args.reference_image_id)
+    reference_image_id, health_payload = resolve_reference_image_id(
+        args.base_url, args.reference_image_id
+    )
     run_id = run_id_now()
     run_dir = (RUNS_ROOT / run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -169,7 +199,11 @@ def main() -> int:
         "created_at": utc_now_iso(),
         "base_url": args.base_url.rstrip("/"),
         "reference_image_id": reference_image_id,
-        "reference_image": health_payload.get("reference_image") if isinstance(health_payload.get("reference_image"), dict) else None,
+        "reference_image": (
+            health_payload.get("reference_image")
+            if isinstance(health_payload.get("reference_image"), dict)
+            else None
+        ),
         "series_id": str(series.get("series_id") or "identity_research_series"),
         "series_file": str(args.series_file.resolve()),
         "providers": providers,
@@ -182,7 +216,9 @@ def main() -> int:
         },
     }
 
-    generate_url = f"{args.base_url.rstrip('/')}/experimental/identity-research/generate"
+    generate_url = (
+        f"{args.base_url.rstrip('/')}/experimental/identity-research/generate"
+    )
     for case in cases:
         case_id = str(case.get("case_id") or "").strip()
         title = str(case.get("title") or case_id).strip() or case_id
@@ -211,8 +247,14 @@ def main() -> int:
             duration_seconds = round(time.perf_counter() - started_at, 3)
             result_id = str(response_payload.get("result_id") or "").strip() or None
             metadata_payload = read_result_metadata(result_id) if result_id else None
-            metadata_file = str((RESULTS_ROOT / f"{result_id}.json").resolve()) if result_id and metadata_payload is not None else None
-            output_file = str(metadata_payload.get("source_output_file") or "").strip() or response_payload.get("output_file")
+            metadata_file = (
+                str((RESULTS_ROOT / f"{result_id}.json").resolve())
+                if result_id and metadata_payload is not None
+                else None
+            )
+            output_file = str(
+                metadata_payload.get("source_output_file") or ""
+            ).strip() or response_payload.get("output_file")
             success = status_code == 200 and response_payload.get("status") == "ok"
             case_result["results"].append(
                 {
@@ -223,8 +265,10 @@ def main() -> int:
                     "output_file": output_file,
                     "metadata_file": metadata_file,
                     "duration_seconds": duration_seconds,
-                    "blocker": str(response_payload.get("blocker") or "").strip() or None,
-                    "error_type": str(response_payload.get("error_type") or "").strip() or None,
+                    "blocker": str(response_payload.get("blocker") or "").strip()
+                    or None,
+                    "error_type": str(response_payload.get("error_type") or "").strip()
+                    or None,
                     "response": response_payload,
                 }
             )
@@ -237,16 +281,23 @@ def main() -> int:
 
     manifest_path = run_dir / "manifest.json"
     report_path = run_dir / "report.md"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=True, indent=2), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=True, indent=2), encoding="utf-8"
+    )
     report_path.write_text(build_report_markdown(manifest), encoding="utf-8")
 
-    print(json.dumps({
-        "status": "ok",
-        "run_id": run_id,
-        "manifest": str(manifest_path.resolve()),
-        "report": str(report_path.resolve()),
-        "summary": manifest["summary"],
-    }, ensure_ascii=True))
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "run_id": run_id,
+                "manifest": str(manifest_path.resolve()),
+                "report": str(report_path.resolve()),
+                "summary": manifest["summary"],
+            },
+            ensure_ascii=True,
+        )
+    )
     return 0
 
 
