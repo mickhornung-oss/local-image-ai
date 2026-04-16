@@ -30,7 +30,8 @@ def text_chat_connection(db_path: Path) -> sqlite3.Connection:
 
 def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
     with text_chat_connection(db_path) as connection:
-        connection.execute("""
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS text_chat_slots (
                 slot_index INTEGER PRIMARY KEY,
                 title TEXT,
@@ -41,8 +42,10 @@ def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
                 created_at TEXT,
                 updated_at TEXT
             )
-            """)
-        connection.execute("""
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS text_chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 slot_index INTEGER NOT NULL,
@@ -50,13 +53,16 @@ def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
-            """)
-        connection.execute("""
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS text_chat_state (
                 state_key TEXT PRIMARY KEY,
                 state_value TEXT NOT NULL
             )
-            """)
+            """
+        )
         for slot_index in range(1, slot_count + 1):
             connection.execute(
                 """
@@ -66,10 +72,12 @@ def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
                 """,
                 (slot_index,),
             )
-        connection.execute("""
+        connection.execute(
+            """
             INSERT OR IGNORE INTO text_chat_state (state_key, state_value)
             VALUES ('active_slot_index', '1')
-            """)
+            """
+        )
         slot_columns = {
             str(row["name"]).strip().lower()
             for row in connection.execute(

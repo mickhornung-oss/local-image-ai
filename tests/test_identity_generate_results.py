@@ -75,12 +75,13 @@ class IdentityGenerateResultsTests(unittest.TestCase):
         self.assertEqual(payload["error_type"], "api_error")
 
     def test_build_server_error_returns_internal_error_response(self) -> None:
-        status, payload = (
-            identity_generate_results.build_identity_generate_server_error(
-                mode="identity_research",
-                request_id="req-000004",
-                error_response_builder=lambda **kwargs: kwargs,
-            )
+        (
+            status,
+            payload,
+        ) = identity_generate_results.build_identity_generate_server_error(
+            mode="identity_research",
+            request_id="req-000004",
+            error_response_builder=lambda **kwargs: kwargs,
         )
 
         self.assertEqual(status, HTTPStatus.INTERNAL_SERVER_ERROR)

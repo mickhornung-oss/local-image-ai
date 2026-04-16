@@ -375,9 +375,9 @@ def run_identity_multi_reference(
             payload["reference_image_ids"] = [
                 str(reference["image_id"]) for reference in references
             ]
-            payload["multi_reference_strategy"] = (
-                "instantid_primary_two_reference_batch"
-            )
+            payload[
+                "multi_reference_strategy"
+            ] = "instantid_primary_two_reference_batch"
             return payload
 
         payload = build_success_payload(

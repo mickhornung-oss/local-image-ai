@@ -81,13 +81,17 @@ def execute_text_chat_service_request(
     summary: str | None,
     recent_messages: list[dict],
 ) -> dict:
-    response_payload, response_error, response_status, service_name, model_status = (
-        request_callable(
-            composed_prompt,
-            mode=mode,
-            summary=summary,
-            recent_messages=recent_messages,
-        )
+    (
+        response_payload,
+        response_error,
+        response_status,
+        service_name,
+        model_status,
+    ) = request_callable(
+        composed_prompt,
+        mode=mode,
+        summary=summary,
+        recent_messages=recent_messages,
     )
     if retry_predicate(
         switch_result=switch_result,

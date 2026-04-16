@@ -2998,9 +2998,10 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path == MULTI_REFERENCE_STATUS_PATH:
-            multi_reference_dir_accessible, multi_reference_dir_error = (
-                multi_reference_dir_access_state()
-            )
+            (
+                multi_reference_dir_accessible,
+                multi_reference_dir_error,
+            ) = multi_reference_dir_access_state()
             if not multi_reference_dir_accessible:
                 self.send_json(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -3319,19 +3320,18 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             return
 
         request_id = self.server.next_request_id()
-        prepared, prepare_error = (
-            general_generate_flow.prepare_general_generate_request(
-                self.read_json_body(),
-                normalize_negative_prompt=normalize_optional_negative_prompt,
-                parse_boolean_flag=lambda value: parse_boolean_flag(
-                    value, default=False
-                ),
-                normalize_denoise_strength_value=normalize_denoise_strength_value,
-                resolve_generation_request=resolve_generation_request,
-                resolve_requested_input_image=resolve_requested_input_image,
-                resolve_requested_mask_image=resolve_requested_mask_image,
-                resolve_inpainting_tuning=resolve_inpainting_tuning,
-            )
+        (
+            prepared,
+            prepare_error,
+        ) = general_generate_flow.prepare_general_generate_request(
+            self.read_json_body(),
+            normalize_negative_prompt=normalize_optional_negative_prompt,
+            parse_boolean_flag=lambda value: parse_boolean_flag(value, default=False),
+            normalize_denoise_strength_value=normalize_denoise_strength_value,
+            resolve_generation_request=resolve_generation_request,
+            resolve_requested_input_image=resolve_requested_input_image,
+            resolve_requested_mask_image=resolve_requested_mask_image,
+            resolve_inpainting_tuning=resolve_inpainting_tuning,
         )
         if prepare_error is not None or prepared is None:
             self.send_json(
@@ -3398,65 +3398,67 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self.send_json(*busy_response)
             return
 
-        response_status, response_payload = (
-            generate_endpoint_flow.execute_generate_endpoint(
-                render_callable=lambda: run_render(
-                    prompt=str(render_request["render_prompt"]),
+        (
+            response_status,
+            response_payload,
+        ) = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_render(
+                prompt=str(render_request["render_prompt"]),
+                mode=mode,
+                workflow=str(prepared["workflow"]),
+                checkpoint=checkpoint,
+                negative_prompt=(
+                    render_request["negative_prompt_value"]
+                    if isinstance(render_request.get("negative_prompt_value"), str)
+                    else None
+                ),
+                steps=int(render_request["steps_value"]),
+                cfg=float(render_request["cfg_value"]),
+                use_input_image=use_input_image,
+                input_image_path=input_image_path,
+                use_inpainting=use_inpainting,
+                mask_image_path=mask_image_path,
+                denoise_strength=denoise_strength,
+                grow_mask_by_override=render_request.get("grow_mask_by_override"),
+                wait=True,
+                wait_timeout=EDIT_WAIT_TIMEOUT_SECONDS if use_edit_image else 180,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: finalize_generate_result(
+                result,
+                request_id,
+                prompt=str(render_request["prompt_text"]),
+                checkpoint=checkpoint,
+                use_input_image=use_input_image,
+                use_inpainting=use_inpainting,
+                extra_metadata={
+                    "negative_prompt": negative_prompt,
+                },
+            ),
+            server_error_callable=lambda: (
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_error_response(
                     mode=mode,
-                    workflow=str(prepared["workflow"]),
-                    checkpoint=checkpoint,
-                    negative_prompt=(
-                        render_request["negative_prompt_value"]
-                        if isinstance(render_request.get("negative_prompt_value"), str)
-                        else None
-                    ),
-                    steps=int(render_request["steps_value"]),
-                    cfg=float(render_request["cfg_value"]),
-                    use_input_image=use_input_image,
-                    input_image_path=input_image_path,
-                    use_inpainting=use_inpainting,
-                    mask_image_path=mask_image_path,
-                    denoise_strength=denoise_strength,
-                    grow_mask_by_override=render_request.get("grow_mask_by_override"),
-                    wait=True,
-                    wait_timeout=EDIT_WAIT_TIMEOUT_SECONDS if use_edit_image else 180,
-                    output_dir=comfy_output_dir(),
-                    logger=None,
-                    error_logger=None,
+                    error_type="api_error",
+                    blocker="server_error",
+                    request_id=request_id,
                 ),
-                finalize_callable=lambda result: finalize_generate_result(
-                    result,
-                    request_id,
-                    prompt=str(render_request["prompt_text"]),
-                    checkpoint=checkpoint,
-                    use_input_image=use_input_image,
-                    use_inpainting=use_inpainting,
-                    extra_metadata={
-                        "negative_prompt": negative_prompt,
-                    },
-                ),
-                server_error_callable=lambda: (
-                    HTTPStatus.INTERNAL_SERVER_ERROR,
-                    build_error_response(
-                        mode=mode,
-                        error_type="api_error",
-                        blocker="server_error",
-                        request_id=request_id,
-                    ),
-                ),
-                finish_render=self.server.finish_render,
-            )
+            ),
+            finish_render=self.server.finish_render,
         )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_reference_generate(self) -> None:
         request_id = self.server.next_request_id()
-        prepared, prepare_error = (
-            identity_generate_flow.prepare_identity_reference_request(
-                self.read_json_body(),
-                resolve_reference_image=resolve_requested_reference_image,
-            )
+        (
+            prepared,
+            prepare_error,
+        ) = identity_generate_flow.prepare_identity_reference_request(
+            self.read_json_body(),
+            resolve_reference_image=resolve_requested_reference_image,
         )
         if prepare_error is not None or prepared is None:
             self.send_json(
@@ -3502,48 +3504,50 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self.send_json(*busy_response)
             return
 
-        response_status, response_payload = (
-            generate_endpoint_flow.execute_generate_endpoint(
-                render_callable=lambda: run_identity_reference(
-                    prompt=prompt.strip(),
-                    reference_image_path=reference_image_path,
-                    checkpoint=checkpoint,
-                    wait=True,
-                    output_dir=comfy_output_dir(),
-                    logger=None,
-                    error_logger=None,
-                ),
-                finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
-                    result,
-                    request_id=request_id,
-                    mode=IDENTITY_REFERENCE_MODE,
-                    prompt=prompt.strip(),
-                    checkpoint=checkpoint,
-                    default_failed_blocker="identity_reference_failed",
-                    status_code_resolver=resolve_identity_reference_status_code,
-                    finalize_result=finalize_generate_result,
-                    error_response_builder=build_error_response,
-                ),
-                server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
-                    mode=IDENTITY_REFERENCE_MODE,
-                    request_id=request_id,
-                    error_response_builder=build_error_response,
-                ),
-                finish_render=self.server.finish_render,
-            )
+        (
+            response_status,
+            response_payload,
+        ) = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_reference(
+                prompt=prompt.strip(),
+                reference_image_path=reference_image_path,
+                checkpoint=checkpoint,
+                wait=True,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
+                request_id=request_id,
+                mode=IDENTITY_REFERENCE_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_reference_failed",
+                status_code_resolver=resolve_identity_reference_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_REFERENCE_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
         )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_research_generate(self) -> None:
         request_id = self.server.next_request_id()
-        prepared, prepare_error = (
-            identity_generate_flow.prepare_identity_research_request(
-                self.read_json_body(),
-                resolve_reference_image=resolve_requested_reference_image,
-                normalize_negative_prompt=normalize_optional_negative_prompt,
-                default_provider=IDENTITY_RESEARCH_DEFAULT_PROVIDER,
-            )
+        (
+            prepared,
+            prepare_error,
+        ) = identity_generate_flow.prepare_identity_research_request(
+            self.read_json_body(),
+            resolve_reference_image=resolve_requested_reference_image,
+            normalize_negative_prompt=normalize_optional_negative_prompt,
+            default_provider=IDENTITY_RESEARCH_DEFAULT_PROVIDER,
         )
         if prepare_error is not None or prepared is None:
             self.send_json(
@@ -3612,80 +3616,80 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self.send_json(*busy_response)
             return
 
-        response_status, response_payload = (
-            generate_endpoint_flow.execute_generate_endpoint(
-                render_callable=lambda: run_identity_research(
-                    prompt=prompt.strip(),
-                    negative_prompt=negative_prompt or "",
-                    reference_image_path=reference_image_path,
-                    provider=provider,
-                    checkpoint=checkpoint,
-                    wait=True,
-                    output_dir=comfy_output_dir(),
-                    logger=None,
-                    error_logger=None,
-                ),
-                finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
-                    result,
-                    request_id=request_id,
-                    mode=IDENTITY_RESEARCH_MODE,
-                    prompt=prompt.strip(),
-                    checkpoint=checkpoint,
-                    default_failed_blocker="identity_research_failed",
-                    status_code_resolver=resolve_identity_reference_status_code,
-                    finalize_result=finalize_generate_result,
-                    error_response_builder=build_error_response,
-                    extra_metadata={
-                        "negative_prompt": negative_prompt,
-                        "provider": provider,
-                        "identity_research_provider": provider,
-                        "identity_research_workflow": str(
-                            result.get("workflow_name") or ""
+        (
+            response_status,
+            response_payload,
+        ) = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_research(
+                prompt=prompt.strip(),
+                negative_prompt=negative_prompt or "",
+                reference_image_path=reference_image_path,
+                provider=provider,
+                checkpoint=checkpoint,
+                wait=True,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
+                request_id=request_id,
+                mode=IDENTITY_RESEARCH_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_research_failed",
+                status_code_resolver=resolve_identity_reference_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "negative_prompt": negative_prompt,
+                    "provider": provider,
+                    "identity_research_provider": provider,
+                    "identity_research_workflow": str(
+                        result.get("workflow_name") or ""
+                    ).strip()
+                    or None,
+                    "identity_research_reference_image_id": str(
+                        reference_image_payload.get("image_id") or ""
+                    ).strip()
+                    or None,
+                    "identity_research_reference_file_name": (
+                        str(reference_image_payload.get("stored_name") or "").strip()
+                        or str(
+                            reference_image_payload.get("original_name") or ""
                         ).strip()
-                        or None,
-                        "identity_research_reference_image_id": str(
-                            reference_image_payload.get("image_id") or ""
-                        ).strip()
-                        or None,
-                        "identity_research_reference_file_name": (
-                            str(
-                                reference_image_payload.get("stored_name") or ""
-                            ).strip()
-                            or str(
-                                reference_image_payload.get("original_name") or ""
-                            ).strip()
-                            or None
-                        ),
-                        "reference_count": 1,
-                        "reference_image_ids": (
-                            [reference_image_payload["image_id"]]
-                            if isinstance(reference_image_payload.get("image_id"), str)
-                            and reference_image_payload.get("image_id")
-                            else []
-                        ),
-                        "store_scope": "app_results",
-                        "cleanup_policy": "retention_limit",
-                        "experimental": True,
-                    },
-                ),
-                server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
-                    mode=IDENTITY_RESEARCH_MODE,
-                    request_id=request_id,
-                    error_response_builder=build_error_response,
-                ),
-                finish_render=self.server.finish_render,
-            )
+                        or None
+                    ),
+                    "reference_count": 1,
+                    "reference_image_ids": (
+                        [reference_image_payload["image_id"]]
+                        if isinstance(reference_image_payload.get("image_id"), str)
+                        and reference_image_payload.get("image_id")
+                        else []
+                    ),
+                    "store_scope": "app_results",
+                    "cleanup_policy": "retention_limit",
+                    "experimental": True,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_RESEARCH_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
         )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_transfer_generate(self) -> None:
         request_id = self.server.next_request_id()
-        prepared, prepare_error = (
-            identity_generate_flow.prepare_identity_reference_request(
-                self.read_json_body(),
-                resolve_reference_image=lambda value: ({}, None),
-            )
+        (
+            prepared,
+            prepare_error,
+        ) = identity_generate_flow.prepare_identity_reference_request(
+            self.read_json_body(),
+            resolve_reference_image=lambda value: ({}, None),
         )
         if prepare_error is not None or prepared is None:
             self.send_json(
@@ -3750,80 +3754,80 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self.send_json(*busy_response)
             return
 
-        response_status, response_payload = (
-            generate_endpoint_flow.execute_generate_endpoint(
-                render_callable=lambda: run_identity_transfer(
-                    prompt=prompt.strip(),
-                    checkpoint=checkpoint,
-                    wait=True,
-                    output_dir=comfy_output_dir(),
-                    logger=None,
-                    error_logger=None,
-                ),
-                finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
-                    result,
-                    request_id=request_id,
-                    mode=IDENTITY_TRANSFER_MODE,
-                    prompt=prompt.strip(),
-                    checkpoint=checkpoint,
-                    default_failed_blocker="identity_transfer_failed",
-                    status_code_resolver=resolve_identity_transfer_generate_status_code,
-                    finalize_result=finalize_generate_result,
-                    error_response_builder=build_error_response,
-                    extra_metadata={
-                        "used_roles": (
-                            result.get("used_roles")
-                            if isinstance(result.get("used_roles"), list)
-                            else []
-                        ),
-                        "pose_reference_present": bool(
-                            result.get("pose_reference_present")
-                        ),
-                        "pose_reference_used": bool(result.get("pose_reference_used")),
-                        "transfer_mask_present": bool(
-                            result.get("transfer_mask_present")
-                        ),
-                        "transfer_mask_used": bool(result.get("transfer_mask_used")),
-                        "identity_head_reference_image_id": str(
-                            result.get("identity_head_reference_image_id") or ""
-                        ).strip()
-                        or None,
-                        "target_body_image_id": str(
-                            result.get("target_body_image_id") or ""
-                        ).strip()
-                        or None,
-                        "pose_reference_image_id": str(
-                            result.get("pose_reference_image_id") or ""
-                        ).strip()
-                        or None,
-                        "transfer_mask_image_id": str(
-                            result.get("transfer_mask_image_id") or ""
-                        ).strip()
-                        or None,
-                        "identity_transfer_strategy": str(
-                            result.get("identity_transfer_strategy") or ""
-                        ).strip()
-                        or None,
-                    },
-                ),
-                server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
-                    mode=IDENTITY_TRANSFER_MODE,
-                    request_id=request_id,
-                    error_response_builder=build_error_response,
-                ),
-                finish_render=self.server.finish_render,
-            )
+        (
+            response_status,
+            response_payload,
+        ) = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_transfer(
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                wait=True,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
+                request_id=request_id,
+                mode=IDENTITY_TRANSFER_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_transfer_failed",
+                status_code_resolver=resolve_identity_transfer_generate_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "used_roles": (
+                        result.get("used_roles")
+                        if isinstance(result.get("used_roles"), list)
+                        else []
+                    ),
+                    "pose_reference_present": bool(
+                        result.get("pose_reference_present")
+                    ),
+                    "pose_reference_used": bool(result.get("pose_reference_used")),
+                    "transfer_mask_present": bool(result.get("transfer_mask_present")),
+                    "transfer_mask_used": bool(result.get("transfer_mask_used")),
+                    "identity_head_reference_image_id": str(
+                        result.get("identity_head_reference_image_id") or ""
+                    ).strip()
+                    or None,
+                    "target_body_image_id": str(
+                        result.get("target_body_image_id") or ""
+                    ).strip()
+                    or None,
+                    "pose_reference_image_id": str(
+                        result.get("pose_reference_image_id") or ""
+                    ).strip()
+                    or None,
+                    "transfer_mask_image_id": str(
+                        result.get("transfer_mask_image_id") or ""
+                    ).strip()
+                    or None,
+                    "identity_transfer_strategy": str(
+                        result.get("identity_transfer_strategy") or ""
+                    ).strip()
+                    or None,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_TRANSFER_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
         )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_transfer_mask_hybrid_generate(self) -> None:
         request_id = self.server.next_request_id()
-        prepared, prepare_error = (
-            identity_generate_flow.prepare_identity_reference_request(
-                self.read_json_body(),
-                resolve_reference_image=lambda value: ({}, None),
-            )
+        (
+            prepared,
+            prepare_error,
+        ) = identity_generate_flow.prepare_identity_reference_request(
+            self.read_json_body(),
+            resolve_reference_image=lambda value: ({}, None),
         )
         if prepare_error is not None or prepared is None:
             self.send_json(
@@ -3888,79 +3892,79 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self.send_json(*busy_response)
             return
 
-        response_status, response_payload = (
-            generate_endpoint_flow.execute_generate_endpoint(
-                render_callable=lambda: run_identity_transfer_mask_hybrid(
-                    prompt=prompt.strip(),
-                    checkpoint=checkpoint,
-                    wait=True,
-                    output_dir=comfy_output_dir(),
-                    logger=None,
-                    error_logger=None,
-                ),
-                finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
-                    result,
-                    request_id=request_id,
-                    mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
-                    prompt=prompt.strip(),
-                    checkpoint=checkpoint,
-                    default_failed_blocker="identity_transfer_failed",
-                    status_code_resolver=resolve_identity_transfer_generate_status_code,
-                    finalize_result=finalize_generate_result,
-                    error_response_builder=build_error_response,
-                    extra_metadata={
-                        "used_roles": (
-                            result.get("used_roles")
-                            if isinstance(result.get("used_roles"), list)
-                            else []
-                        ),
-                        "pose_reference_present": bool(
-                            result.get("pose_reference_present")
-                        ),
-                        "pose_reference_used": bool(result.get("pose_reference_used")),
-                        "transfer_mask_present": bool(
-                            result.get("transfer_mask_present")
-                        ),
-                        "transfer_mask_used": bool(result.get("transfer_mask_used")),
-                        "identity_head_reference_image_id": str(
-                            result.get("identity_head_reference_image_id") or ""
-                        ).strip()
-                        or None,
-                        "target_body_image_id": str(
-                            result.get("target_body_image_id") or ""
-                        ).strip()
-                        or None,
-                        "pose_reference_image_id": str(
-                            result.get("pose_reference_image_id") or ""
-                        ).strip()
-                        or None,
-                        "transfer_mask_image_id": str(
-                            result.get("transfer_mask_image_id") or ""
-                        ).strip()
-                        or None,
-                        "identity_transfer_strategy": str(
-                            result.get("identity_transfer_strategy") or ""
-                        ).strip()
-                        or None,
-                    },
-                ),
-                server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
-                    mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
-                    request_id=request_id,
-                    error_response_builder=build_error_response,
-                ),
-                finish_render=self.server.finish_render,
-            )
+        (
+            response_status,
+            response_payload,
+        ) = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_transfer_mask_hybrid(
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                wait=True,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
+                request_id=request_id,
+                mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_transfer_failed",
+                status_code_resolver=resolve_identity_transfer_generate_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "used_roles": (
+                        result.get("used_roles")
+                        if isinstance(result.get("used_roles"), list)
+                        else []
+                    ),
+                    "pose_reference_present": bool(
+                        result.get("pose_reference_present")
+                    ),
+                    "pose_reference_used": bool(result.get("pose_reference_used")),
+                    "transfer_mask_present": bool(result.get("transfer_mask_present")),
+                    "transfer_mask_used": bool(result.get("transfer_mask_used")),
+                    "identity_head_reference_image_id": str(
+                        result.get("identity_head_reference_image_id") or ""
+                    ).strip()
+                    or None,
+                    "target_body_image_id": str(
+                        result.get("target_body_image_id") or ""
+                    ).strip()
+                    or None,
+                    "pose_reference_image_id": str(
+                        result.get("pose_reference_image_id") or ""
+                    ).strip()
+                    or None,
+                    "transfer_mask_image_id": str(
+                        result.get("transfer_mask_image_id") or ""
+                    ).strip()
+                    or None,
+                    "identity_transfer_strategy": str(
+                        result.get("identity_transfer_strategy") or ""
+                    ).strip()
+                    or None,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_TRANSFER_MASK_HYBRID_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
         )
 
         self.send_json(response_status, response_payload)
 
     def handle_identity_multi_reference_generate(self) -> None:
         request_id = self.server.next_request_id()
-        payload_dict, payload_error = (
-            identity_generate_flow.coerce_identity_generate_payload(
-                self.read_json_body()
-            )
+        (
+            payload_dict,
+            payload_error,
+        ) = identity_generate_flow.coerce_identity_generate_payload(
+            self.read_json_body()
         )
         if payload_error is not None or payload_dict is None:
             self.send_json(
@@ -3975,10 +3979,11 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 )
             )
             return
-        prepared, prepare_error = (
-            identity_generate_flow.normalize_identity_prompt_and_checkpoint(
-                payload_dict
-            )
+        (
+            prepared,
+            prepare_error,
+        ) = identity_generate_flow.normalize_identity_prompt_and_checkpoint(
+            payload_dict
         )
         if prepare_error is not None or prepared is None:
             self.send_json(
@@ -4046,55 +4051,56 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self.send_json(*busy_response)
             return
 
-        response_status, response_payload = (
-            generate_endpoint_flow.execute_generate_endpoint(
-                render_callable=lambda: run_identity_multi_reference(
-                    prompt=prompt.strip(),
-                    adapter_state=identity_generate_flow.resolve_multi_reference_adapter_state(
-                        runtime_state,
-                        fallback_adapter_state=adapter_state,
+        (
+            response_status,
+            response_payload,
+        ) = generate_endpoint_flow.execute_generate_endpoint(
+            render_callable=lambda: run_identity_multi_reference(
+                prompt=prompt.strip(),
+                adapter_state=identity_generate_flow.resolve_multi_reference_adapter_state(
+                    runtime_state,
+                    fallback_adapter_state=adapter_state,
+                ),
+                checkpoint=checkpoint,
+                wait=True,
+                output_dir=comfy_output_dir(),
+                logger=None,
+                error_logger=None,
+            ),
+            finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
+                result,
+                request_id=request_id,
+                mode=IDENTITY_MULTI_REFERENCE_MODE,
+                prompt=prompt.strip(),
+                checkpoint=checkpoint,
+                default_failed_blocker="identity_multi_reference_failed",
+                status_code_resolver=resolve_identity_multi_reference_status_code,
+                finalize_result=finalize_generate_result,
+                error_response_builder=build_error_response,
+                extra_metadata={
+                    "reference_count": int(result.get("reference_count") or 0),
+                    "reference_slots": (
+                        result.get("reference_slots")
+                        if isinstance(result.get("reference_slots"), list)
+                        else []
                     ),
-                    checkpoint=checkpoint,
-                    wait=True,
-                    output_dir=comfy_output_dir(),
-                    logger=None,
-                    error_logger=None,
-                ),
-                finalize_callable=lambda result: identity_generate_results.finalize_identity_generate_outcome(
-                    result,
-                    request_id=request_id,
-                    mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    prompt=prompt.strip(),
-                    checkpoint=checkpoint,
-                    default_failed_blocker="identity_multi_reference_failed",
-                    status_code_resolver=resolve_identity_multi_reference_status_code,
-                    finalize_result=finalize_generate_result,
-                    error_response_builder=build_error_response,
-                    extra_metadata={
-                        "reference_count": int(result.get("reference_count") or 0),
-                        "reference_slots": (
-                            result.get("reference_slots")
-                            if isinstance(result.get("reference_slots"), list)
-                            else []
-                        ),
-                        "reference_image_ids": (
-                            result.get("reference_image_ids")
-                            if isinstance(result.get("reference_image_ids"), list)
-                            else []
-                        ),
-                        "multi_reference_strategy": str(
-                            result.get("multi_reference_strategy") or ""
-                        ).strip()
-                        or None,
-                    },
-                ),
-                server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
-                    mode=IDENTITY_MULTI_REFERENCE_MODE,
-                    request_id=request_id,
-                    error_response_builder=build_error_response,
-                ),
-                finish_render=self.server.finish_render,
-            )
+                    "reference_image_ids": (
+                        result.get("reference_image_ids")
+                        if isinstance(result.get("reference_image_ids"), list)
+                        else []
+                    ),
+                    "multi_reference_strategy": str(
+                        result.get("multi_reference_strategy") or ""
+                    ).strip()
+                    or None,
+                },
+            ),
+            server_error_callable=lambda: identity_generate_results.build_identity_generate_server_error(
+                mode=IDENTITY_MULTI_REFERENCE_MODE,
+                request_id=request_id,
+                error_response_builder=build_error_response,
+            ),
+            finish_render=self.server.finish_render,
         )
 
         self.send_json(response_status, response_payload)

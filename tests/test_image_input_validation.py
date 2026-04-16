@@ -77,11 +77,12 @@ class ImageInputValidationTests(unittest.TestCase):
         self.assertEqual(info["mime_type"], "image/png")
         self.assertEqual(info["width"], 4)
 
-        normalized_payload, normalized_info = (
-            image_input_validation.normalize_mask_upload_payload(
-                payload,
-                mask_binary_threshold=128,
-            )
+        (
+            normalized_payload,
+            normalized_info,
+        ) = image_input_validation.normalize_mask_upload_payload(
+            payload,
+            mask_binary_threshold=128,
         )
         self.assertTrue(normalized_payload)
         self.assertEqual(normalized_info["extension"], ".png")
@@ -134,14 +135,16 @@ class ImageInputValidationTests(unittest.TestCase):
             + _png_bytes()
             + f"\r\n--{boundary}--\r\n".encode("utf-8")
         )
-        original_name, payload, slot_index = (
-            image_input_validation.parse_multipart_multi_reference_image(
-                f"multipart/form-data; boundary={boundary}",
-                multipart,
-                slot_index_parser=lambda value: image_input_validation.parse_optional_multi_reference_slot_index(
-                    value, max_slots=3
-                ),
-            )
+        (
+            original_name,
+            payload,
+            slot_index,
+        ) = image_input_validation.parse_multipart_multi_reference_image(
+            f"multipart/form-data; boundary={boundary}",
+            multipart,
+            slot_index_parser=lambda value: image_input_validation.parse_optional_multi_reference_slot_index(
+                value, max_slots=3
+            ),
         )
         self.assertEqual(original_name, "image.png")
         self.assertEqual(slot_index, 2)

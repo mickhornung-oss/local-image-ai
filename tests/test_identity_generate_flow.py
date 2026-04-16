@@ -12,10 +12,11 @@ class IdentityGenerateFlowTests(unittest.TestCase):
         self.assertIsNone(payload)
         self.assertEqual(error["blocker"], "invalid_json")
 
-        normalized, normalize_error = (
-            identity_generate_flow.normalize_identity_prompt_and_checkpoint(
-                {"prompt": "  Test prompt  ", "checkpoint": "  model.safetensors "}
-            )
+        (
+            normalized,
+            normalize_error,
+        ) = identity_generate_flow.normalize_identity_prompt_and_checkpoint(
+            {"prompt": "  Test prompt  ", "checkpoint": "  model.safetensors "}
         )
         self.assertIsNone(normalize_error)
         self.assertEqual(normalized["prompt"], "Test prompt")
