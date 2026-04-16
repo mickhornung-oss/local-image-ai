@@ -1,12 +1,68 @@
-# Historisches Dokument - Code KI V1
+# Historisches Dokument - Code KI V1 (Veraltet)
 
-Dieses Dokument beschreibt ein frueheres Teilprojekt (`Code KI V1`) und nicht den aktiven Produktkern der heutigen `Local Image AI`.
+## System Design - Local Image AI (Aktuell)
 
-Fuer den aktiven Produktkern gelten stattdessen:
+```mermaid
+graph TB
+    subgraph Win["Windows App UI"]
+        UI1["Text Mode<br/>Chat Interface"]
+        UI2["Image Gen Mode<br/>Prompt Builder"]
+    end
+    
+    subgraph Backend["Python Backend<br/>Flask/FastAPI"]
+        TEXT["Text KI Engine<br/>Ollama/OpenAI"]
+        IMG["Image Gen<br/>Stable Diffusion"]
+        PROC["Image Processor<br/>PIL/OpenCV"]
+    end
+    
+    subgraph Storage["Local Storage"]
+        DB["Chat DB<br/>SQLite"]
+        CACHE["Image Cache<br/>Output Folder"]
+    end
+    
+    subgraph External["External APIs"]
+        OAI["OpenAI<br/>GPT-4"]
+        SD["Stable Diffusion<br/>v1.5+"]
+    end
+    
+    UI1 -->|prompt| TEXT
+    UI2 -->|description| IMG
+    TEXT --> OAI
+    TEXT --> DB
+    IMG --> SD
+    IMG --> PROC
+    PROC --> CACHE
+    CACHE -->|display| UI2
+    DB -->|history| UI1
+    
+    style Win fill:#3498db,color:#fff
+    style Backend fill:#2ecc71,color:#fff
+    style Storage fill:#e74c3c,color:#fff
+    style External fill:#f39c12,color:#fff
+```
+
+## Active Product Core (MP-01)
+
+Für den aktiven Produktkern siehe:
 - `README.md`
 - `docs/product_core_mp01.md`
+- `docs/technical_closeout_mp04.md`
 
-# Architektur V1
+### Produktive Features (MP-01)
+- Text KI Chat + Persistierung
+- Image Generation (mit Stable Diffusion)
+- Image Refinement & Inpainting
+- Gallery + Download/Export
+- V6 Identity Engine (Research)
+
+### Performance (RTX 4090)
+- Image Gen: ~3-5s pro 1024x1024
+- Memory: ~8GB VRAM + 4GB RAM
+- Cache: 100 Bilder In-Memory
+
+---
+
+# Dieses Dokument - Code KI V1 (Historisch)
 
 ## Ziel
 
