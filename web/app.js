@@ -2031,19 +2031,26 @@
       const modeAllowsInputImage = modeEl.value !== "placeholder";
       const canUseInputImage = hasInputImage && modeAllowsInputImage;
       const canUseInpainting = hasInputImage && hasMaskImage && modeAllowsInputImage;
+      
+      // Task-aware disable logic: never disable a checkbox for its required task
+      const isEditTask = isV7BasicModeActive() && currentV7BasicTask === "edit";
+      const isInpaintTask = isV7BasicModeActive() && currentV7BasicTask === "inpaint";
 
-      if (!canUseInputImage) {
+      // Only disable input image checkbox if not available AND not required by edit task
+      if (!canUseInputImage && !isEditTask) {
         useInputImageEl.checked = false;
       }
-      if (!canUseInpainting) {
+      // Only disable inpaint checkbox if not available AND not required by inpaint task
+      if (!canUseInpainting && !isInpaintTask) {
         useInpaintingEl.checked = false;
       }
-      if (useInpaintingEl.checked) {
+      // Ensure inpainting can't be true without input image
+      if (useInpaintingEl.checked && !useInputImageEl.checked) {
         useInputImageEl.checked = true;
       }
 
-      useInputImageEl.disabled = !canUseInputImage;
-      useInpaintingEl.disabled = !canUseInpainting;
+      useInputImageEl.disabled = !canUseInputImage && !isEditTask;
+      useInpaintingEl.disabled = !canUseInpainting && !isInpaintTask;
       const activeDenoiseMax = getActiveDenoiseMax();
       denoiseStrengthEl.max = activeDenoiseMax.toFixed(2);
       denoiseStrengthEl.value = normalizeDenoiseStrength(denoiseStrengthEl.value, activeDenoiseMax).toFixed(2);
@@ -12442,8 +12449,8 @@
 
     function renderUi() {
       reconcileTransientLocalHintState();
-      syncV7BasicTaskDefaults();
       syncGenerateInputControls();
+      syncV7BasicTaskDefaults();
       renderV7NavigationUi();
       const derivedState = deriveUiState();
       const requestStatus = deriveRequestStatusView();
@@ -13244,6 +13251,10 @@
       renderUi();
 
       const body = { prompt, mode: effectiveMode };
+      // Add task_id for clarity and debugging (especially for image modes)
+      if (isV7BasicModeActive() && BASIC_IMAGE_TASK_IDS.includes(currentV7BasicTask)) {
+        body.task_id = currentV7BasicTask;
+      }
       if (negativePrompt) {
         body.negative_prompt = negativePrompt;
       }
