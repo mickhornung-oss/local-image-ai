@@ -69,94 +69,108 @@
       </div>
     </section>
 
-    <section id="section-generate" class="basic-surface basic-surface-work">
-      <div class="section-header">
+    <section id="section-generate" class="basic-surface basic-surface-work generate-compact">
+      <div class="generate-header">
         <h2 id="generate-section-title">Bild erstellen</h2>
-        <span id="generate-section-hint" class="section-hint">Prompt eingeben und Ergebnis erhalten</span>
+        <div id="generate-basic-guide" class="guided-task-note" hidden></div>
       </div>
-      <div id="generate-basic-guide" class="guided-task-note" hidden></div>
-      <div id="basic-image-style-switch" class="style-switch-card" hidden>
-        <div class="style-switch-copy">
-          <strong>Bildwelt</strong>
-          <span id="basic-image-style-hint">Waehle den Stil deines Bildes: Foto fuer natuerliche Szenen, Anime fuer stilisierte Figuren mit freierer Interpretation.</span>
-        </div>
-        <div class="style-switch-buttons">
-          <button id="basic-image-style-photo" class="style-switch-button active" type="button">
-            <strong>Foto</strong>
-            <span>Natuerliche Gesichter und reale Szenen</span>
-          </button>
-          <button id="basic-image-style-anime" class="style-switch-button" type="button">
-            <strong>Anime</strong>
-            <span>Stilisierte Figuren und Anime-Look</span>
-          </button>
-        </div>
-      </div>
-      <div id="generate-active-input-context" class="upload-preview-panel" hidden>
-        <div class="upload-preview-label">Aktives Eingabebild</div>
-        <img id="generate-active-input-preview" alt="aktives eingabebild">
-        <div id="generate-active-input-meta" class="request-state"></div>
-      </div>
-      <div id="generate-prompt-block">
-        <div class="prompt-input-toolbar">
-          <label for="prompt">Prompt</label>
-          <div class="speech-input-group">
-            <button id="prompt-speech-button" class="speech-input-button" type="button">Diktat</button>
-            <span id="prompt-speech-state" class="speech-input-feedback" aria-live="polite"></span>
+
+      <div class="generate-workspace">
+        <!-- MAIN WORK AREA: Prompt + Negative + Input Image -->
+        <div class="generate-main">
+          <!-- Prompt Area -->
+          <div class="generate-prompt-zone">
+            <div class="generate-prompt-label-row">
+              <label for="prompt">Prompt</label>
+              <div class="generate-prompt-actions">
+                <button id="prompt-speech-button" class="generate-speech-button" type="button" title="Diktat">🎤</button>
+                <span id="prompt-speech-state" class="generate-speech-feedback" aria-live="polite"></span>
+              </div>
+            </div>
+            <textarea id="prompt" class="generate-prompt-input">portrait photo of a person, cinematic lighting, realistic lens rendering</textarea>
+          </div>
+
+          <!-- Negative Prompt (Optional, Toggled) -->
+          <div id="negative-prompt-block" class="generate-negative-zone" hidden>
+            <label for="negative-prompt">Negativ</label>
+            <textarea id="negative-prompt" class="generate-negative-input" placeholder="z.B. unscharf, low quality"></textarea>
+            <div id="standard-negative-prompt-row" class="generate-negative-standard" hidden>
+              <label class="checkbox-row">
+                <input id="use-standard-negative-prompt" type="checkbox" checked>
+                <span>Standard verwenden</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Input Image Preview (Compact) -->
+          <div id="generate-active-input-context" class="generate-input-card" hidden>
+            <img id="generate-active-input-preview" alt="Eingabebild">
+            <div id="generate-active-input-meta" class="generate-input-meta"></div>
           </div>
         </div>
-        <textarea id="prompt">portrait photo of a person, cinematic lighting, realistic lens rendering</textarea>
-        <div id="negative-prompt-block" class="prompt-extra">
-          <label for="negative-prompt">Negativ-Prompt (optional)</label>
-          <textarea id="negative-prompt" placeholder="z. B. unscharf, low quality, chaotischer Hintergrund"></textarea>
-          <div id="negative-prompt-hint" class="request-state">Optional: Beschreibe kurz, was im Bild vermieden werden soll.</div>
-          <div id="standard-negative-prompt-row" class="negative-prompt-toggle-row" hidden>
-            <label class="checkbox-row">
-              <input id="use-standard-negative-prompt" type="checkbox" checked>
-              <span>Standard-Negativprompt verwenden</span>
-            </label>
-            <div id="standard-negative-prompt-copy" class="negative-prompt-toggle-copy">
-              Setzt bei Bedarf: bad anatomy, bad proportions, deformed body, bad hands, extra fingers, deformed face, blurry
+
+        <!-- SIDEBAR: Optional Options (Collapsible) -->
+        <div class="generate-options-panel">
+          <button id="generate-options-toggle" class="generate-options-header" type="button">
+            <span>Optionen</span>
+            <span class="generate-options-arrow">▼</span>
+          </button>
+          
+          <div id="generate-options-content" class="generate-options-content" hidden>
+            <!-- Bildwelt Switch (Compact) -->
+            <div id="basic-image-style-switch" class="generate-option-item">
+              <div class="generate-option-label">Bildwelt</div>
+              <div class="generate-style-buttons">
+                <button id="basic-image-style-photo" class="generate-style-button active" type="button" data-style="photo">Foto</button>
+                <button id="basic-image-style-anime" class="generate-style-button" type="button" data-style="anime">Anime</button>
+              </div>
+            </div>
+
+            <!-- Advanced Controls -->
+            <div class="generate-option-item">
+              <label for="mode" class="generate-option-label">Mode</label>
+              <select id="mode">
+                <option value="auto">auto</option>
+                <option value="sdxl">sdxl</option>
+                <option value="placeholder">placeholder</option>
+              </select>
+            </div>
+
+            <div class="generate-option-item">
+              <label for="checkpoint" class="generate-option-label">Checkpoint</label>
+              <input id="checkpoint" type="text" placeholder="optional">
+            </div>
+
+            <div class="generate-option-item">
+              <label for="denoise-strength" class="generate-option-label">Aenderungsstaerke</label>
+              <input id="denoise-strength" type="number" min="0.05" max="0.55" step="0.05" value="0.25">
+            </div>
+
+            <div class="generate-option-item">
+              <label class="checkbox-row">
+                <input id="use-input-image" type="checkbox">
+                <span>Mit Eingabebild</span>
+              </label>
+            </div>
+
+            <div class="generate-option-item">
+              <label class="checkbox-row">
+                <input id="use-inpainting" type="checkbox">
+                <span>Nur Bereich aendern</span>
+              </label>
             </div>
           </div>
         </div>
       </div>
-      <div id="generate-control-grid" class="grid">
-        <div id="generate-control-mode">
-          <label for="mode">Mode</label>
-          <select id="mode">
-            <option value="auto">auto</option>
-            <option value="sdxl">sdxl</option>
-            <option value="placeholder">placeholder</option>
-          </select>
-        </div>
-        <div id="generate-control-checkpoint">
-          <label for="checkpoint">Checkpoint</label>
-          <input id="checkpoint" type="text" placeholder="optional">
-        </div>
-        <div id="generate-control-input-toggle">
-          <label for="use-input-image">Ausgangsbild</label>
-          <div class="checkbox-row">
-            <input id="use-input-image" type="checkbox">
-            <span>Eingabebild verwenden</span>
-          </div>
-        </div>
-        <div id="generate-control-denoise">
-          <label for="denoise-strength">Aenderungsstaerke</label>
-          <input id="denoise-strength" type="number" min="0.05" max="0.55" step="0.05" value="0.25">
-        </div>
-        <div id="generate-control-inpaint-toggle">
-          <label for="use-inpainting">Bereichsmaske</label>
-          <div class="checkbox-row">
-            <input id="use-inpainting" type="checkbox">
-            <span>Nur markierten Bereich aendern</span>
-          </div>
-        </div>
-      </div>
-      <div class="actions">
+
+      <!-- FOOTER: Action + Status -->
+      <div class="generate-footer">
         <button id="generate" type="button" disabled>Generieren</button>
-        <span id="request-state" class="request-state">System wird geprueft...</span>
+        <span id="request-state" class="generate-status">System wird geprueft...</span>
       </div>
-      <div id="generate-progress-panel" class="progress-panel" hidden>
+
+      <!-- Progress Panel (Inline, Compact) -->
+      <div id="generate-progress-panel" class="generate-progress-compact" hidden>
         <div class="progress-panel-head">
           <div id="generate-progress-title" class="progress-panel-title">Bild wird vorbereitet</div>
           <div id="generate-progress-meta" class="progress-panel-meta">Lauf aktiv</div>
@@ -165,10 +179,6 @@
           <div class="progress-track-fill"></div>
         </div>
         <div id="generate-progress-steps" class="progress-steps"></div>
-      </div>
-      <div class="status-stack">
-        <div id="system-summary" class="status-line">System wird geladen...</div>
-        <div id="action-feedback" class="status-line">Bereit</div>
       </div>
     </section>
 

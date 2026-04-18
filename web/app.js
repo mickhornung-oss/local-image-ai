@@ -122,18 +122,23 @@
     const sectionCurrentResultEl = document.getElementById("section-current-result");
     const sectionResultsEl = document.getElementById("section-results");
     const generateSectionTitleEl = document.getElementById("generate-section-title");
-    const generateSectionHintEl = document.getElementById("generate-section-hint");
+    // Removed: generateSectionHintEl (text hints removed for compact structure)
     const generateBasicGuideEl = document.getElementById("generate-basic-guide");
     const generateActiveInputContextEl = document.getElementById("generate-active-input-context");
     const generateActiveInputPreviewEl = document.getElementById("generate-active-input-preview");
     const generateActiveInputMetaEl = document.getElementById("generate-active-input-meta");
     const basicImageStyleSwitchEl = document.getElementById("basic-image-style-switch");
-    const basicImageStyleHintEl = document.getElementById("basic-image-style-hint");
+    // Removed: basicImageStyleHintEl (text hints removed for compact structure)
     const basicImageStylePhotoEl = document.getElementById("basic-image-style-photo");
     const basicImageStyleAnimeEl = document.getElementById("basic-image-style-anime");
     const textServiceBasicSectionTitleEl = document.getElementById("text-service-basic-section-title");
     const textServiceBasicSectionHintEl = document.getElementById("text-service-basic-section-hint");
     const textServiceBasicGuideEl = document.getElementById("text-service-basic-guide");
+    // New compact generate structure
+    const generateOptionsToggleEl = document.getElementById("generate-options-toggle");
+    const generateOptionsContentEl = document.getElementById("generate-options-content");
+    const negativPromptBlockEl = document.getElementById("negative-prompt-block");
+    // Old IDs (for compatibility, but may not be needed):
     const generateControlGridEl = document.getElementById("generate-control-grid");
     const generateControlModeEl = document.getElementById("generate-control-mode");
     const generateControlCheckpointEl = document.getElementById("generate-control-checkpoint");
@@ -294,10 +299,9 @@
     );
     const promptEl = document.getElementById("prompt");
     const negativePromptEl = document.getElementById("negative-prompt");
-    const negativePromptHintEl = document.getElementById("negative-prompt-hint");
+    // Removed: negativePromptHintEl, standardNegativePromptCopyEl (text hints removed for compact structure)
     const standardNegativePromptRowEl = document.getElementById("standard-negative-prompt-row");
     const useStandardNegativePromptEl = document.getElementById("use-standard-negative-prompt");
-    const standardNegativePromptCopyEl = document.getElementById("standard-negative-prompt-copy");
     const modeEl = document.getElementById("mode");
     const checkpointEl = document.getElementById("checkpoint");
     const useInputImageEl = document.getElementById("use-input-image");
@@ -7180,9 +7184,12 @@
       }
 
       useStandardNegativePromptEl.checked = basicTaskStandardNegativeEnabled[taskId] === true;
-      standardNegativePromptCopyEl.textContent = useStandardNegativePromptEl.checked
-        ? `Aktiv setzt optional: ${STANDARD_NEGATIVE_PROMPT_TEXT}`
-        : "Deaktiviert: Das Feld bleibt komplett unter deiner Kontrolle.";
+      // Only update if element exists (new compact structure may not have this)
+      if (standardNegativePromptCopyEl) {
+        standardNegativePromptCopyEl.textContent = useStandardNegativePromptEl.checked
+          ? `Aktiv setzt optional: ${STANDARD_NEGATIVE_PROMPT_TEXT}`
+          : "Deaktiviert: Das Feld bleibt komplett unter deiner Kontrolle.";
+      }
     }
 
     function getCurrentBasicImageStyleConfig() {
@@ -7240,30 +7247,36 @@
 
       if (!basicMode || !BASIC_IMAGE_TASK_IDS.includes(taskId)) {
         negativePromptEl.placeholder = "Optional: Elemente oder Artefakte, die vermieden werden sollen.";
-        negativePromptHintEl.textContent = "Optional: Beschreibe kurz, was im Bild vermieden werden soll.";
+        if (negativePromptHintEl) negativePromptHintEl.textContent = "Optional: Beschreibe kurz, was im Bild vermieden werden soll.";
         return;
       }
 
       if (taskId === "create") {
         negativePromptEl.placeholder = "z. B. unscharf, low quality, chaotischer Hintergrund";
-        negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.create === true
-          ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar und abschaltbar."
-          : "Optional: Unerwuenschte Bildanteile beim neuen Bild vermeiden.";
+        if (negativePromptHintEl) {
+          negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.create === true
+            ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar und abschaltbar."
+            : "Optional: Unerwuenschte Bildanteile beim neuen Bild vermeiden.";
+        }
         return;
       }
 
       if (taskId === "edit") {
         negativePromptEl.placeholder = "z. B. keine neue Person, kein Hintergrundchaos, nicht unscharf";
-        negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.edit === true
-          ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar und wird nicht staendig ueberschrieben."
-          : "Optional: Hilft, das Ausgangsbild ruhiger zu erhalten.";
+        if (negativePromptHintEl) {
+          negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.edit === true
+            ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar und wird nicht staendig ueberschrieben."
+            : "Optional: Hilft, das Ausgangsbild ruhiger zu erhalten.";
+        }
         return;
       }
 
       negativePromptEl.placeholder = "z. B. keine Aenderung ausserhalb der Maske, keine Unschaerfe";
-      negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.inpaint === true
-        ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar. Fuer groessere Inpaint-Faelle lieber ruhig und gezielt bleiben."
-        : "Optional: Hilft, die Aenderung lokaler im markierten Bereich zu halten.";
+      if (negativePromptHintEl) {
+        negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.inpaint === true
+          ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar. Fuer groessere Inpaint-Faelle lieber ruhig und gezielt bleiben."
+          : "Optional: Hilft, die Aenderung lokaler im markierten Bereich zu halten.";
+      }
     }
 
     function renderV7GenerateActiveInputContext(taskId, basicMode) {
@@ -7325,32 +7338,34 @@
 
       if (!basicMode || !["create", "edit", "inpaint"].includes(taskId)) {
         generateSectionTitleEl.textContent = "Bild erstellen";
-        generateSectionHintEl.textContent = "Prompt, optional Bild und Maske, danach Ergebnis";
+        // Removed verbose section hint (text reduction for compact UI)
         setGuidedTaskNote(generateBasicGuideEl, null, null, false);
         basicImageStyleSwitchEl.hidden = true;
-        generateControlModeEl.hidden = false;
-        generateControlCheckpointEl.hidden = false;
-        generateControlInputToggleEl.hidden = false;
-        generateControlDenoiseEl.hidden = false;
-        generateControlInpaintToggleEl.hidden = false;
-        generateControlGridEl.hidden = false;
+        // Note: Old control elements may not exist in new compact structure
+        if (generateControlModeEl) generateControlModeEl.hidden = false;
+        if (generateControlCheckpointEl) generateControlCheckpointEl.hidden = false;
+        if (generateControlInputToggleEl) generateControlInputToggleEl.hidden = false;
+        if (generateControlDenoiseEl) generateControlDenoiseEl.hidden = false;
+        if (generateControlInpaintToggleEl) generateControlInpaintToggleEl.hidden = false;
+        if (generateControlGridEl) generateControlGridEl.hidden = false;
         return;
       }
 
       basicImageStyleSwitchEl.hidden = false;
-      basicImageStyleHintEl.textContent = `${styleConfig.label} ${styleConfig.hint.toLowerCase()}`;
+      // Removed: basicImageStyleHintEl.textContent update (verbose hint removed)
       basicImageStylePhotoEl.classList.toggle("active", currentBasicImageStyle === "photo");
       basicImageStyleAnimeEl.classList.toggle("active", currentBasicImageStyle === "anime");
-      generateControlModeEl.hidden = true;
-      generateControlCheckpointEl.hidden = true;
-      generateControlInputToggleEl.hidden = true;
-      generateControlInpaintToggleEl.hidden = true;
-      generateControlDenoiseEl.hidden = taskId !== "edit";
-      generateControlGridEl.hidden = taskId !== "edit";
+      // Note: New structure hides these in sidebar
+      if (generateControlModeEl) generateControlModeEl.hidden = true;
+      if (generateControlCheckpointEl) generateControlCheckpointEl.hidden = true;
+      if (generateControlInputToggleEl) generateControlInputToggleEl.hidden = true;
+      if (generateControlInpaintToggleEl) generateControlInpaintToggleEl.hidden = true;
+      if (generateControlDenoiseEl) generateControlDenoiseEl.hidden = taskId !== "edit";
+      if (generateControlGridEl) generateControlGridEl.hidden = taskId !== "edit";
 
       if (taskId === "create") {
         generateSectionTitleEl.textContent = "Neues Bild erstellen";
-        generateSectionHintEl.textContent = `Beschreibe kurz Motiv, Stil, Licht und Stimmung fuer dein ${currentBasicImageStyle === "anime" ? "Anime-Bild" : "Bild"}.`;
+        // Removed verbose section hint
         setGuidedTaskNote(
           generateBasicGuideEl,
           "1. Prompt schreiben",
@@ -7362,7 +7377,7 @@
 
       if (taskId === "edit") {
         generateSectionTitleEl.textContent = "Bild anpassen";
-        generateSectionHintEl.textContent = "Dein Ausgangsbild bleibt die Grundlage. Beschreibe nur die gewuenschte Aenderung. Fuer Spezialfaelle mit derselben Person nutze den getrennten Expertenbereich.";
+        // Removed verbose section hint
         setGuidedTaskNote(
           generateBasicGuideEl,
           "2. Aenderung beschreiben",
@@ -7373,7 +7388,7 @@
       }
 
       generateSectionTitleEl.textContent = "Bereich im Bild aendern";
-      generateSectionHintEl.textContent = "Markiere zuerst den Bereich. Dieser Modus ist am staerksten bei kleineren lokalen Aenderungen. Grosse Kleidungs-/Formwechsel sind aktuell nicht verlaesslich genug.";
+      // Removed verbose section hint
       setGuidedTaskNote(
         generateBasicGuideEl,
         "3. Bereich beschreiben",
@@ -13447,6 +13462,16 @@
     });
     resetMaskImageEl.addEventListener("click", resetUploadedMaskImage);
     generateEl.addEventListener("click", attemptGenerateWithPreflight);
+    
+    // New compact generate structure - Options toggle
+    if (generateOptionsToggleEl) {
+      generateOptionsToggleEl.addEventListener("click", () => {
+        const isHidden = generateOptionsContentEl.hidden;
+        generateOptionsContentEl.hidden = !isHidden;
+        generateOptionsToggleEl.setAttribute("aria-expanded", isHidden ? "true" : "false");
+      });
+    }
+    
     identityGenerateEl.addEventListener("click", () => {
       void attemptIdentityReferenceGenerate();
     });
