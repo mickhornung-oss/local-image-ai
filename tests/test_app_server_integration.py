@@ -81,6 +81,9 @@ class DummyHandler:
     def serve_index(self) -> None:
         raise AssertionError("serve_index should not be called in this test")
 
+    def serve_frontend_asset(self, request_path: str) -> None:
+        raise AssertionError(f"serve_frontend_asset should not be called in this test: {request_path}")
+
 
 class AppServerIntegrationTests(unittest.TestCase):
     def test_resolve_default_text_model_profile_id_stays_on_standard(self) -> None:
@@ -105,6 +108,46 @@ class AppServerIntegrationTests(unittest.TestCase):
         status, payload = handler.sent[0]
         self.assertEqual(HTTPStatus.OK, status)
         self.assertTrue(payload["comfyui_reachable"])
+
+    def test_do_get_style_asset_routes_to_frontend_asset_handler(self) -> None:
+        handler = DummyHandler(path="/style.css", server=DummyServer())
+        captured_paths: list[str] = []
+
+        with patch.object(
+            handler,
+            "serve_frontend_asset",
+            side_effect=lambda request_path: captured_paths.append(request_path),
+        ):
+            app_server.AppRequestHandler.do_GET(handler)
+
+        self.assertEqual(["/style.css"], captured_paths)
+        self.assertEqual([], handler.sent)
+
+    def test_do_get_app_js_asset_routes_to_frontend_asset_handler(self) -> None:
+        handler = DummyHandler(path="/app.js", server=DummyServer())
+        captured_paths: list[str] = []
+
+        with patch.object(
+            handler,
+            "serve_frontend_asset",
+            side_effect=lambda request_path: captured_paths.append(request_path),
+        ):
+            app_server.AppRequestHandler.do_GET(handler)
+
+        self.assertEqual(["/app.js"], captured_paths)
+        self.assertEqual([], handler.sent)
+
+    def test_do_get_speech_status_returns_runtime_payload(self) -> None:
+        handler = DummyHandler(path="/speech/status", server=DummyServer())
+
+        with patch.object(
+            app_server.speech_transcription,
+            "build_runtime_state_payload",
+            return_value={"status": "ok", "ok": True, "available": True, "backend": "faster_whisper"},
+        ):
+            app_server.AppRequestHandler.handle_speech_status(handler)
+
+        self.assertEqual([(HTTPStatus.OK, {"status": "ok", "ok": True, "available": True, "backend": "faster_whisper"})], handler.sent)
 
     def test_handle_text_chat_create_returns_overview_payload(self) -> None:
         handler = DummyHandler(json_body={"title": "Idee"})
@@ -157,6 +200,23 @@ class AppServerIntegrationTests(unittest.TestCase):
             [(HTTPStatus.OK, {"status": "ok", "ok": True, "image_id": "input-1"})],
             handler.sent,
         )
+
+    def test_handle_speech_transcribe_maps_success_response(self) -> None:
+        handler = DummyHandler(
+            body=b"payload",
+            headers={"Content-Type": "multipart/form-data; boundary=abc"},
+        )
+
+        with patch.object(app_server.image_input_validation, "validate_multipart_content_type"), \
+             patch.object(app_server.speech_transcription, "parse_multipart_audio", return_value=("input.webm", b"payload", "de")), \
+             patch.object(
+                 app_server.speech_transcription,
+                 "transcribe_audio_payload",
+                 return_value={"status": "ok", "ok": True, "text": "Hallo Welt"},
+             ):
+            app_server.AppRequestHandler.handle_speech_transcribe(handler)
+
+        self.assertEqual([(HTTPStatus.OK, {"status": "ok", "ok": True, "text": "Hallo Welt"})], handler.sent)
 
     def test_handle_result_export_maps_store_error(self) -> None:
         handler = DummyHandler(json_body={"result_id": "result-1"})
@@ -212,12 +272,57 @@ class AppServerIntegrationTests(unittest.TestCase):
             handler.sent,
         )
 
-    def test_do_post_generate_routes_through_general_flow_and_endpoint_flow(
-        self,
-    ) -> None:
-        handler = DummyHandler(
-            path="/generate", json_body={"prompt": "Prompt"}, server=DummyServer()
-        )
+    def test_handle_scene_results_list_returns_scene_payload(self) -> None:
+        handler = DummyHandler(path="/scenes/scene-1/results?limit=5")
+
+        with patch.object(app_server.scene_store, "get_scene", return_value={"id": "scene-1", "title": "Szene 1"}), \
+             patch.object(app_server.scene_store, "list_scene_results", return_value=["result-1"]), \
+             patch.object(
+                 app_server,
+                 "list_scene_result_items",
+                 return_value=([{"result_id": "result-1", "preview_url": "/results/files/result-1.png"}], [], 1),
+             ):
+            app_server.AppRequestHandler.handle_scene_results_list(handler, "scene-1")
+
+        self.assertEqual(1, len(handler.sent))
+        status, payload = handler.sent[0]
+        self.assertEqual(HTTPStatus.OK, status)
+        self.assertEqual("scene-1", payload["scene_id"])
+        self.assertEqual(["result-1"], payload["result_ids"])
+        self.assertEqual(1, payload["total_result_count"])
+        self.assertEqual(5, payload["limit"])
+
+    def test_handle_scene_results_list_returns_not_found_when_scene_missing(self) -> None:
+        handler = DummyHandler(path="/scenes/missing/results")
+
+        with patch.object(app_server.scene_store, "get_scene", return_value=None):
+            app_server.AppRequestHandler.handle_scene_results_list(handler, "missing")
+
+        self.assertEqual(1, len(handler.sent))
+        status, payload = handler.sent[0]
+        self.assertEqual(HTTPStatus.NOT_FOUND, status)
+        self.assertEqual("scene_not_found", payload["blocker"])
+
+    def test_handle_scene_export_returns_export_payload(self) -> None:
+        handler = DummyHandler()
+
+        with patch.object(
+            app_server,
+            "create_scene_export",
+            return_value={
+                "status": "ok",
+                "ok": True,
+                "scene_id": "scene-1",
+                "export_url": "/exports/files/scene-1.md",
+                "export_file_name": "scene-1.md",
+            },
+        ):
+            app_server.AppRequestHandler.handle_scene_export(handler, "scene-1")
+
+        self.assertEqual([(HTTPStatus.OK, {"status": "ok", "ok": True, "scene_id": "scene-1", "export_url": "/exports/files/scene-1.md", "export_file_name": "scene-1.md"})], handler.sent)
+
+    def test_do_post_generate_routes_through_general_flow_and_endpoint_flow(self) -> None:
+        handler = DummyHandler(path="/generate", json_body={"prompt": "Prompt"}, server=DummyServer())
 
         with patch.object(
             app_server.general_generate_flow,

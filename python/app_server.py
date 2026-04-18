@@ -130,6 +130,14 @@ from render_identity_research import (
     build_identity_research_runtime_state,
     run_identity_research,
 )
+try:
+    import scene_store
+except ModuleNotFoundError:
+    from python import scene_store
+try:
+    import speech_transcription
+except ModuleNotFoundError:
+    from python import speech_transcription
 from render_identity_transfer import (
     IDENTITY_TRANSFER_MODE,
     build_identity_transfer_runtime_state,
@@ -172,6 +180,10 @@ IDENTITY_TRANSFER_ROUTE_PREFIX = "/identity-transfer/"
 RESULT_FILE_ROUTE_PREFIX = "/results/files/"
 RESULT_DOWNLOAD_ROUTE_PREFIX = "/results/download/"
 EXPORT_FILE_ROUTE_PREFIX = "/exports/files/"
+FRONTEND_ASSET_ROUTE_MAP = {
+    "/style.css": "style.css",
+    "/app.js": "app.js",
+}
 RESULT_LIST_PATH = "/results"
 RESULT_EXPORT_PATH = "/results/export"
 RESULT_DELETE_PATH = "/results/delete"
@@ -204,6 +216,10 @@ MASK_IMAGE_EDITOR_PATH = "/mask-image/editor"
 TEXT_SERVICE_PROMPT_TEST_PATH = "/text-service/prompt-test"
 TEXT_CHAT_SLOTS_PATH = "/text-service/chats"
 TEXT_CHAT_CREATE_PATH = "/text-service/chats/new"
+SCENE_LIST_PATH = "/scenes"
+SCENE_ID_PREFIX = "/scenes/"
+SPEECH_STATUS_PATH = "/speech/status"
+SPEECH_TRANSCRIBE_PATH = "/speech/transcribe"
 UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 RESULTS_DEFAULT_LIMIT = 20
 RESULTS_MAX_LIMIT = 100
@@ -370,8 +386,16 @@ def export_root() -> Path:
     return (repo_root() / "data" / "exports").resolve()
 
 
+def speech_temp_root() -> Path:
+    return (repo_root() / "data" / "tmp" / "speech").resolve()
+
+
 def text_chat_db_path() -> Path:
     return (repo_root() / "data" / "text_chats.sqlite3").resolve()
+
+
+def scene_db_path() -> Path:
+    return (repo_root() / "data" / "scenes.sqlite3").resolve()
 
 
 def repo_relative_path(path: Path) -> str:
@@ -380,6 +404,7 @@ def repo_relative_path(path: Path) -> str:
 
 UploadRequestError = image_input_validation.UploadRequestError
 ResultStoreError = result_output.ResultStoreError
+SpeechTranscriptionError = speech_transcription.SpeechTranscriptionError
 
 
 def read_json_file_detail(path: Path) -> tuple[dict | None, str | None]:
@@ -1566,6 +1591,167 @@ def resolve_text_chat_slot_request_path(
         slot_index_normalizer=normalize_text_chat_slot_index,
     )
 
+
+def resolve_scene_request_path(request_path: str) -> tuple[str, str | None] | None:
+    if not request_path.startswith(SCENE_ID_PREFIX):
+        return None
+    remainder = request_path[len(SCENE_ID_PREFIX):]
+    if not remainder:
+        return None
+    parts = remainder.split("/", 1)
+    scene_id = parts[0].strip()
+    if not scene_id:
+        return None
+    action = parts[1].strip() if len(parts) > 1 else None
+    return scene_id, action
+
+
+def get_scene_overview() -> dict:
+    return scene_store.build_scene_overview(scene_db_path())
+
+
+def build_scene_error_response(*, error_type: str, blocker: str, message: str) -> dict:
+    return {"status": "error", "ok": False, "error_type": error_type, "blocker": blocker, "message": message}
+
+
+def parse_scene_results_limit(query_string: str) -> int:
+    try:
+        parsed = parse_qs(query_string or "")
+    except Exception:
+        return 24
+    raw_limit = parsed.get("limit", [None])[0]
+    if raw_limit is None:
+        return 24
+    try:
+        value = int(str(raw_limit).strip())
+    except (TypeError, ValueError):
+        return 24
+    if value < 1:
+        return 1
+    if value > 100:
+        return 100
+    return value
+
+
+def list_scene_result_items(scene_id: str, *, limit: int = 24) -> tuple[list[dict], list[str], int]:
+    entries = scene_store.list_scene_result_entries(scene_db_path(), scene_id)
+    total_count = len(entries)
+    limited_entries = entries[: max(1, int(limit))]
+    items: list[dict] = []
+    missing_result_ids: list[str] = []
+    for entry in limited_entries:
+        result_id = str(entry.get("result_id") or "").strip()
+        if not result_id:
+            continue
+        result_item, _ = resolve_result_download_item(result_id)
+        if not isinstance(result_item, dict):
+            missing_result_ids.append(result_id)
+            continue
+        item_payload = dict(result_item)
+        linked_at = str(entry.get("linked_at") or "").strip()
+        item_payload["scene_linked_at"] = linked_at or None
+        items.append(item_payload)
+    return items, missing_result_ids, total_count
+
+
+def scene_exports_root() -> Path:
+    return (export_root() / "scenes").resolve()
+
+
+def create_scene_export(scene_id: str) -> dict:
+    scene = scene_store.get_scene(scene_db_path(), scene_id)
+    if scene is None:
+        raise ResultStoreError(
+            status_code=HTTPStatus.NOT_FOUND,
+            error_type="not_found",
+            blocker="scene_not_found",
+            message="Scene not found.",
+        )
+
+    result_items, missing_result_ids, total_count = list_scene_result_items(scene_id, limit=200)
+    export_dir = scene_exports_root()
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_title = str(scene.get("title") or "").strip() or scene_id
+    title_token = sanitize_export_token(raw_title, fallback="scene", max_length=48)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    file_stem = f"scene-{title_token}-{timestamp}"
+    markdown_path = export_dir / f"{file_stem}.md"
+    json_path = export_dir / f"{file_stem}.json"
+    if markdown_path.exists() or json_path.exists():
+        suffix = secrets.token_hex(2)
+        file_stem = f"{file_stem}-{suffix}"
+        markdown_path = export_dir / f"{file_stem}.md"
+        json_path = export_dir / f"{file_stem}.json"
+
+    scene_body = str(scene.get("body") or "")
+    lines: list[str] = [
+        f"# Szene: {raw_title}",
+        "",
+        f"- Szene-ID: {scene_id}",
+        f"- Aktualisiert: {scene.get('updated_at') or ''}",
+        f"- Verknuepfte Bilder: {total_count}",
+        "",
+        "## Textkoerper",
+        "",
+        scene_body if scene_body else "_(leer)_",
+        "",
+        "## Zugeordnete Bilder",
+        "",
+    ]
+    if result_items:
+        for item in result_items:
+            mode = str(item.get("mode") or "bild")
+            created_at = str(item.get("created_at") or "")
+            file_name = str(item.get("file_name") or item.get("result_id") or "")
+            preview_url = str(item.get("preview_url") or "")
+            download_url = str(item.get("download_url") or "")
+            prompt = str(item.get("prompt") or "").strip()
+            prompt_snippet = prompt[:180].strip()
+            lines.append(f"- {created_at} | {mode} | {file_name}")
+            if prompt_snippet:
+                lines.append(f"  - Prompt: {prompt_snippet}{'...' if len(prompt) > 180 else ''}")
+            if download_url:
+                lines.append(f"  - Download: {download_url}")
+            if preview_url:
+                lines.append(f"  - Vorschau: {preview_url}")
+            lines.append("")
+    else:
+        lines.append("Keine zugeordneten Bilder vorhanden.")
+        lines.append("")
+
+    if missing_result_ids:
+        lines.append("## Fehlende Bildreferenzen")
+        lines.append("")
+        for missing_id in missing_result_ids:
+            lines.append(f"- {missing_id}")
+        lines.append("")
+
+    markdown_path.write_text("\n".join(lines), encoding="utf-8")
+    export_payload = {
+        "scene": scene,
+        "scene_id": scene_id,
+        "total_result_count": total_count,
+        "exported_result_count": len(result_items),
+        "missing_result_ids": missing_result_ids,
+        "result_items": result_items,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+    }
+    json_path.write_text(json.dumps(export_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "status": "ok",
+        "ok": True,
+        "scene_id": scene_id,
+        "export_file_name": markdown_path.name,
+        "export_url": export_path_to_web_path(markdown_path),
+        "export_json_file_name": json_path.name,
+        "export_json_url": export_path_to_web_path(json_path),
+        "exported_result_count": len(result_items),
+        "total_result_count": total_count,
+        "missing_result_ids": missing_result_ids,
+        "exported_at": export_payload["exported_at"],
+    }
 
 def output_dir_access_state() -> tuple[bool, str | None]:
     root = output_root()
@@ -2962,8 +3148,14 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path in {"/", "/index.html"}:
             self.serve_index()
             return
+        if parsed.path in FRONTEND_ASSET_ROUTE_MAP:
+            self.serve_frontend_asset(parsed.path)
+            return
         if parsed.path == "/health":
             self.send_json(HTTPStatus.OK, self.server.collect_system_state())
+            return
+        if parsed.path == SPEECH_STATUS_PATH:
+            self.handle_speech_status()
             return
         if parsed.path == TEXT_CHAT_SLOTS_PATH:
             self.handle_text_chat_slots()
@@ -2972,6 +3164,18 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if text_chat_slot_request is not None and text_chat_slot_request[1] is None:
             self.handle_text_chat_slot_detail(text_chat_slot_request[0])
             return
+        if parsed.path == SCENE_LIST_PATH:
+            self.handle_scene_list()
+            return
+        scene_request = resolve_scene_request_path(parsed.path)
+        if scene_request is not None:
+            scene_id, action = scene_request
+            if action is None:
+                self.handle_scene_detail(scene_id)
+                return
+            if action == "results":
+                self.handle_scene_results_list(scene_id)
+                return
         if parsed.path == IDENTITY_REFERENCE_READINESS_PATH:
             readiness_state = build_identity_runtime_state()
             self.send_json(
@@ -3090,6 +3294,12 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == RESULT_DELETE_PATH:
             self.handle_result_delete()
             return
+        scene_request = resolve_scene_request_path(parsed.path)
+        if scene_request is not None:
+            scene_id, action = scene_request
+            if action is None:
+                self.handle_scene_delete(scene_id)
+                return
         if parsed.path == INPUT_IMAGE_RESET_PATH:
             try:
                 clear_current_input_image()
@@ -3267,9 +3477,30 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == MASK_IMAGE_EDITOR_PATH:
             self.handle_mask_editor_save()
             return
+        if parsed.path == SPEECH_TRANSCRIBE_PATH:
+            self.handle_speech_transcribe()
+            return
         if parsed.path == TEXT_CHAT_CREATE_PATH:
             self.handle_text_chat_create()
             return
+        if parsed.path == SCENE_LIST_PATH:
+            self.handle_scene_create()
+            return
+        scene_request = resolve_scene_request_path(parsed.path)
+        if scene_request is not None:
+            scene_id, action = scene_request
+            if action == "activate":
+                self.handle_scene_activate(scene_id)
+                return
+            if action == "save":
+                self.handle_scene_save(scene_id)
+                return
+            if action == "results":
+                self.handle_scene_add_result(scene_id)
+                return
+            if action == "export":
+                self.handle_scene_export(scene_id)
+                return
         text_chat_slot_request = resolve_text_chat_slot_request_path(parsed.path)
         if text_chat_slot_request is not None:
             slot_index, action = text_chat_slot_request
@@ -4105,6 +4336,333 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
         self.send_json(response_status, response_payload)
 
+    def handle_scene_list(self) -> None:
+        try:
+            payload = get_scene_overview()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload)
+
+    def handle_scene_create(self) -> None:
+        body = self.read_json_body()
+        if not isinstance(body, dict):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_scene_error_response(
+                    error_type="invalid_request",
+                    blocker="invalid_json",
+                    message="Request body must be a JSON object.",
+                ),
+            )
+            return
+        title_raw = body.get("title")
+        title, title_error = scene_store.normalize_scene_title(title_raw)
+        if title_error is not None or title is None:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_scene_error_response(
+                    error_type="invalid_request",
+                    blocker=title_error or "missing_scene_title",
+                    message="Scene title is required and must be a non-empty string.",
+                ),
+            )
+            return
+        text_body = str(body.get("body") or "").strip()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        try:
+            created = scene_store.create_scene(scene_db_path(), title=title, body=text_body, now_iso=now_iso)
+            scene_store.set_active_scene_id(scene_db_path(), created["id"])
+            payload = get_scene_overview()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.CREATED, payload)
+
+    def handle_scene_detail(self, scene_id: str) -> None:
+        try:
+            scene = scene_store.get_scene(scene_db_path(), scene_id)
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        if scene is None:
+            self.send_json(
+                HTTPStatus.NOT_FOUND,
+                build_scene_error_response(
+                    error_type="not_found",
+                    blocker="scene_not_found",
+                    message="Scene not found.",
+                ),
+            )
+            return
+        result_items, missing_result_ids, total_count = list_scene_result_items(scene_id, limit=24)
+        result_ids = scene_store.list_scene_results(scene_db_path(), scene_id)
+        self.send_json(
+            HTTPStatus.OK,
+            {
+                "scene": scene,
+                "result_ids": result_ids,
+                "result_items": result_items,
+                "missing_result_ids": missing_result_ids,
+                "total_result_count": total_count,
+            },
+        )
+
+    def handle_scene_save(self, scene_id: str) -> None:
+        body = self.read_json_body()
+        if not isinstance(body, dict):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_scene_error_response(
+                    error_type="invalid_request",
+                    blocker="invalid_json",
+                    message="Request body must be a JSON object.",
+                ),
+            )
+            return
+        title: str | None = None
+        if "title" in body:
+            title_raw = body.get("title")
+            title, title_error = scene_store.normalize_scene_title(title_raw)
+            if title_error is not None or title is None:
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    build_scene_error_response(
+                        error_type="invalid_request",
+                        blocker=title_error or "invalid_scene_title",
+                        message="Scene title must be a non-empty string.",
+                    ),
+                )
+                return
+        text_body: str | None = None
+        if "body" in body:
+            text_body = str(body.get("body") or "")
+        last_prompt: str | None = None
+        if "last_prompt" in body and isinstance(body.get("last_prompt"), str):
+            last_prompt = str(body["last_prompt"]).strip() or None
+        last_negative_prompt: str | None = None
+        if "last_negative_prompt" in body and isinstance(body.get("last_negative_prompt"), str):
+            last_negative_prompt = str(body["last_negative_prompt"]).strip() or None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        try:
+            updated = scene_store.update_scene(
+                scene_db_path(),
+                scene_id,
+                title=title,
+                body=text_body,
+                last_prompt=last_prompt,
+                last_negative_prompt=last_negative_prompt,
+                now_iso=now_iso,
+            )
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        if updated is None:
+            self.send_json(
+                HTTPStatus.NOT_FOUND,
+                build_scene_error_response(
+                    error_type="not_found",
+                    blocker="scene_not_found",
+                    message="Scene not found.",
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, get_scene_overview())
+
+    def handle_scene_activate(self, scene_id: str) -> None:
+        try:
+            scene = scene_store.get_scene(scene_db_path(), scene_id)
+            if scene is None:
+                self.send_json(
+                    HTTPStatus.NOT_FOUND,
+                    build_scene_error_response(
+                        error_type="not_found",
+                        blocker="scene_not_found",
+                        message="Scene not found.",
+                    ),
+                )
+                return
+            scene_store.set_active_scene_id(scene_db_path(), scene_id)
+            payload = get_scene_overview()
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload)
+
+    def handle_scene_delete(self, scene_id: str) -> None:
+        try:
+            deleted = scene_store.delete_scene(scene_db_path(), scene_id)
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        if not deleted:
+            self.send_json(
+                HTTPStatus.NOT_FOUND,
+                build_scene_error_response(
+                    error_type="not_found",
+                    blocker="scene_not_found",
+                    message="Scene not found.",
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, get_scene_overview())
+
+    def handle_scene_add_result(self, scene_id: str) -> None:
+        body = self.read_json_body()
+        if not isinstance(body, dict):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_scene_error_response(
+                    error_type="invalid_request",
+                    blocker="invalid_json",
+                    message="Request body must be a JSON object.",
+                ),
+            )
+            return
+        result_id = str(body.get("result_id") or "").strip()
+        if not result_id:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_scene_error_response(
+                    error_type="invalid_request",
+                    blocker="missing_result_id",
+                    message="result_id is required.",
+                ),
+            )
+            return
+        try:
+            scene = scene_store.get_scene(scene_db_path(), scene_id)
+            if scene is None:
+                self.send_json(
+                    HTTPStatus.NOT_FOUND,
+                    build_scene_error_response(
+                        error_type="not_found",
+                        blocker="scene_not_found",
+                        message="Scene not found.",
+                    ),
+                )
+                return
+            now_iso = datetime.now(timezone.utc).isoformat()
+            scene_store.add_scene_result(scene_db_path(), scene_id, result_id, now_iso=now_iso)
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        results = scene_store.list_scene_results(scene_db_path(), scene_id)
+        self.send_json(HTTPStatus.OK, {"ok": True, "scene_id": scene_id, "result_ids": results})
+
+    def handle_scene_results_list(self, scene_id: str) -> None:
+        parsed = urlparse(self.path)
+        limit = parse_scene_results_limit(parsed.query)
+        try:
+            scene = scene_store.get_scene(scene_db_path(), scene_id)
+            if scene is None:
+                self.send_json(
+                    HTTPStatus.NOT_FOUND,
+                    build_scene_error_response(
+                        error_type="not_found",
+                        blocker="scene_not_found",
+                        message="Scene not found.",
+                    ),
+                )
+                return
+            results = scene_store.list_scene_results(scene_db_path(), scene_id)
+            result_items, missing_result_ids, total_count = list_scene_result_items(scene_id, limit=limit)
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_storage_error",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(
+            HTTPStatus.OK,
+            {
+                "scene_id": scene_id,
+                "result_ids": results,
+                "result_items": result_items,
+                "missing_result_ids": missing_result_ids,
+                "total_result_count": total_count,
+                "limit": limit,
+            },
+        )
+
+    def handle_scene_export(self, scene_id: str) -> None:
+        try:
+            payload = create_scene_export(scene_id)
+        except ResultStoreError as exc:
+            self.send_json(
+                exc.status_code,
+                build_scene_error_response(
+                    error_type=exc.error_type,
+                    blocker=exc.blocker,
+                    message=exc.message,
+                ),
+            )
+            return
+        except OSError as exc:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_scene_error_response(
+                    error_type="api_error",
+                    blocker="scene_export_failed",
+                    message=str(exc),
+                ),
+            )
+            return
+        self.send_json(HTTPStatus.OK, payload)
+
     def handle_text_chat_slots(self) -> None:
         try:
             payload = build_text_chat_overview_payload()
@@ -4865,6 +5423,13 @@ class AppRequestHandler(BaseHTTPRequestHandler):
     def serve_index(self) -> None:
         self.serve_file(app_root() / "index.html")
 
+    def serve_frontend_asset(self, request_path: str) -> None:
+        file_name = FRONTEND_ASSET_ROUTE_MAP.get(request_path)
+        if file_name is None:
+            self.send_json(HTTPStatus.NOT_FOUND, {"status": "error", "reason": "not_found"})
+            return
+        self.serve_file(app_root() / file_name, read_error_status=HTTPStatus.NOT_FOUND)
+
     def serve_input(self, request_path: str) -> None:
         target = resolve_input_request_path(request_path)
         if target is None:
@@ -5149,6 +5714,13 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             return
 
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        suffix = path.suffix.lower()
+        if suffix == ".css":
+            content_type = "text/css"
+        elif suffix == ".js":
+            content_type = "application/javascript"
+        elif suffix == ".md":
+            content_type = "text/markdown; charset=utf-8"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
@@ -5159,6 +5731,54 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             )
         self.end_headers()
         self.wfile.write(content)
+
+    def handle_speech_status(self) -> None:
+        self.send_json(HTTPStatus.OK, speech_transcription.build_runtime_state_payload())
+
+    def handle_speech_transcribe(self) -> None:
+        content_type = self.headers.get("Content-Type", "")
+        try:
+            image_input_validation.validate_multipart_content_type(content_type)
+            raw_body = self.read_body_bytes()
+            original_name, payload, language = speech_transcription.parse_multipart_audio(content_type, raw_body)
+            response_payload = speech_transcription.transcribe_audio_payload(
+                original_name=original_name,
+                payload=payload,
+                language=language,
+                temp_root=speech_temp_root(),
+            )
+        except SpeechTranscriptionError as exc:
+            self.send_json(
+                exc.status_code,
+                build_upload_error_response(
+                    error_type=exc.error_type,
+                    blocker=exc.blocker,
+                    message=exc.message,
+                ),
+            )
+            return
+        except ValueError:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                build_upload_error_response(
+                    error_type="invalid_request",
+                    blocker="invalid_upload_body",
+                    message="Upload request body is invalid.",
+                ),
+            )
+            return
+        except OSError:
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                build_upload_error_response(
+                    error_type="upload_error",
+                    blocker="upload_read_failed",
+                    message="Speech payload could not be read.",
+                ),
+            )
+            return
+
+        self.send_json(HTTPStatus.OK, response_payload)
 
     def handle_input_image_upload(self) -> None:
         content_type = self.headers.get("Content-Type", "")

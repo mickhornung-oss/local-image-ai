@@ -78,6 +78,44 @@ function Test-AppHealth {
     }
 }
 
+function Test-FrontendAssets {
+    param([string]$Url)
+
+    $assetChecks = @(
+        @{ Path = "/style.css"; ContentType = "text/css" },
+        @{ Path = "/app.js"; ContentType = "javascript" }
+    )
+
+    foreach ($check in $assetChecks) {
+        try {
+            $response = Invoke-WebRequest -Uri "$Url$($check.Path)" -UseBasicParsing -TimeoutSec 5
+            if ($response.StatusCode -ne 200) {
+                return @{
+                    Ok = $false
+                    Reason = "$($check.Path) status $($response.StatusCode)"
+                }
+            }
+            $contentType = "$($response.Headers['Content-Type'])"
+            if ([string]::IsNullOrWhiteSpace($contentType) -or $contentType.ToLowerInvariant().Contains($check.ContentType) -eq $false) {
+                return @{
+                    Ok = $false
+                    Reason = "$($check.Path) content-type mismatch"
+                }
+            }
+        } catch {
+            return @{
+                Ok = $false
+                Reason = "$($check.Path) not reachable"
+            }
+        }
+    }
+
+    return @{
+        Ok = $true
+        Reason = $null
+    }
+}
+
 function Remove-IfExists {
     param([string]$Path)
 
@@ -328,7 +366,8 @@ try {
             $lockPayload = $null
         }
 
-        if ($healthProbe.Ok) {
+        $assetProbe = Test-FrontendAssets -Url $url
+        if ($healthProbe.Ok -and $assetProbe.Ok) {
             Remove-IfExists -Path $lockPath
             $listenerPid = Get-ListenerPid -LocalPort $Port
             $result = @{
@@ -342,6 +381,11 @@ try {
             $null = Write-StatusFileAtomic -Path $statusPath -Payload $result
         } else {
             $listenerPid = Get-ListenerPid -LocalPort $Port
+            if ($healthProbe.Ok -and -not $assetProbe.Ok -and $null -ne $listenerPid) {
+                Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 500
+                $listenerPid = Get-ListenerPid -LocalPort $Port
+            }
             if ($null -ne $listenerPid) {
                 $result = @{
                     status = "error"

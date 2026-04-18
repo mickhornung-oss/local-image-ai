@@ -4076,10 +4076,11 @@ Response-Label: hervorgehobene Farbe für Output-Zone */
     }
 
     body.v9-basic-mode .topbar-row {
-      gap: 3px;
+      gap: 4px;
       flex-wrap: nowrap;
       align-items: center;
       overflow: hidden;
+      height: 24px;
     }
 
     /* Szenen- und Chat-Label im Topbar ausblenden (spart Platz) */
@@ -4095,76 +4096,7 @@ Response-Label: hervorgehobene Farbe für Output-Zone */
       letter-spacing: 0.06em;
     }
 
-    body.v9-basic-mode .topbar-slots-group {
-      flex: 1;
-      min-width: 60px;
-      max-width: 240px;
-      gap: 3px;
-      flex-wrap: nowrap;
-      overflow: hidden;
-      flex-shrink: 1;
-    }
-
-    body.v9-basic-mode .topbar-chat-slots {
-      display: flex;
-      flex-wrap: nowrap;
-      gap: 2px;
-      overflow-x: auto;
-      overflow-y: hidden;
-      scrollbar-width: none;
-    }
-
-    body.v9-basic-mode .topbar-chat-slots::-webkit-scrollbar {
-      display: none;
-    }
-
-    body.v9-basic-mode .text-chat-slots.topbar-chat-slots .text-chat-slot {
-      padding: 2px 8px;
-      min-width: 38px;
-      max-width: 90px;
-      border-radius: 18px;
-      font-size: 10px;
-      background: rgba(255, 255, 255, 0.14);
-      border-color: rgba(115, 170, 138, 0.48);
-      white-space: nowrap;
-      overflow: hidden;
-      flex-shrink: 0;
-    }
-
-    body.v9-basic-mode .text-chat-slots.topbar-chat-slots .text-chat-slot.active {
-      background: rgba(65, 130, 88, 0.38);
-      border-color: rgba(110, 185, 145, 0.72);
-      box-shadow: 0 0 0 1px rgba(110, 185, 145, 0.25);
-    }
-
-    /* Slot-Pills: nur Titel sichtbar, Meta + Preview ausgeblendet */
-    body.v9-basic-mode .topbar-chat-slots .text-chat-slot-meta,
-    body.v9-basic-mode .topbar-chat-slots .text-chat-slot-preview {
-      display: none;
-    }
-
-    body.v9-basic-mode .topbar-chat-slots .text-chat-slot .text-chat-slot-title {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: 10px;
-      font-weight: 600;
-      color: rgba(228, 248, 236, 0.97);
-      line-height: 1.2;
-    }
-
-    body.v9-basic-mode #text-chat-slot-state {
-      display: none;
-    }
-
-    body.v9-basic-mode .topbar-actions-group {
-      flex-wrap: nowrap;
-      gap: 2px;
-      flex-shrink: 0;
-      align-items: center;
-      height: 20px;
-      position: relative;
-    }
+    /* Removed duplicate/conflicting topbar-slots-group definitions - using correct ones from earlier section */
 
     /* Aktions-Untergruppen: Chat-Aktionen und Szenen-Aktionen */
     body.v9-basic-mode .topbar-action-group {
