@@ -1811,14 +1811,78 @@
       color: var(--error);
     }
 
-    .current-result {
-      display: grid;
-      gap: 12px;
+    .result-empty-state {
+      display: none;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      padding: 32px 12px;
     }
 
     .current-result img {
       max-height: 640px;
       object-fit: contain;
+      display: block;
+      width: 100%;
+      background: rgba(28, 36, 50, 0.5);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px;
+    }
+
+    /* If no image loaded, show empty state instead */
+    .current-result:has(img[src=""]), 
+    .current-result:has(img:not([src])) {
+      /* Empty state will show */
+    }
+
+    .current-result:has(img[src=""]) #image-state,
+    .current-result:has(img:not([src])) #image-state {
+      display: grid;
+      place-items: center;
+      grid-column: 1;
+      grid-row: 1;
+      min-height: 200px;
+    }
+
+    .current-result:has(img[src=""]) img,
+    .current-result:has(img:not([src])) img {
+      display: none;
+    }
+
+    .current-result img[src] {
+      display: block;
+    }
+
+    .result-status-line {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.3;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Override JavaScript className assignments for status lines */
+    #results-state,
+    #results-storage,
+    #results-export-state,
+    #results-delete-state,
+    #image-state {
+      font-size: 10px !important;
+      color: var(--muted) !important;
+      line-height: 1.3 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      background: transparent !important;
+    }
+
+    .results-footer {
+      display: grid;
+      gap: 6px;
+      margin-top: 12px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(82, 98, 125, 0.2);
     }
 
     .actions {
@@ -1889,22 +1953,36 @@
     .results-gallery {
       display: grid;
       gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      margin-top: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      margin: 0;
+      padding: 0;
+    }
+
+    .results-gallery:empty {
+      display: grid;
+      grid-template-columns: 1fr;
+      padding: 32px 12px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      background: rgba(28, 36, 50, 0.3);
+      border: 1px dashed rgba(82, 98, 125, 0.3);
+      border-radius: 10px;
+      gap: 0;
+    }
+
+    .results-gallery:empty::after {
+      content: "Noch keine Bilder vorhanden";
     }
 
     .results-toolbar {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      justify-content: flex-start;
+      gap: 8px;
       flex-wrap: wrap;
-      margin-top: 8px;
-    }
-
-    .results-storage {
-      margin-top: 10px;
-      font-size: 12px;
+      margin: 0;
+      padding: 0;
     }
 
     .result-card {
@@ -2355,15 +2433,29 @@
     }
 
     body.v9-basic-mode #section-results #results-state {
-      padding: 12px 14px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      font-size: 10px;
+      color: var(--muted);
     }
 
-    body.v9-basic-mode #section-text-service-basic .input-card {
+    body.v9-basic-mode #section-results .results-toolbar,
+    body.v9-basic-mode #section-results .results-storage {
+      padding: 0;
+      border: none;
+      background: transparent;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    body.v9-basic-mode #text-service-basic .input-card {
       gap: 12px;
     }
 
     /* Szenenleiste v9: schmale Bar, kein schwerer Kartenblock */
     body.v9-basic-mode .text-scene-bar {
+    }
       padding: 10px 14px;
       gap: 8px;
       border: 1px solid rgba(188, 204, 226, 0.2);
@@ -2581,7 +2673,6 @@
 
     body.v9-basic-mode #text-service-basic-status,
     body.v9-basic-mode #text-service-basic-response,
-    body.v9-basic-mode #section-current-result #image-state,
     body.v9-basic-mode #section-input-images #upload-hint,
     body.v9-basic-mode #section-input-images #mask-upload-hint {
       padding: 10px 12px;
@@ -2589,6 +2680,12 @@
       border-radius: 14px;
       background: rgba(31, 40, 55, 0.52);
       line-height: 1.45;
+    }
+
+    body.v9-basic-mode #section-current-result .result-empty-state {
+      padding: 0;
+      border: none;
+      background: transparent;
     }
 
     body.v9-basic-mode #text-service-basic-response {
@@ -2962,6 +3059,17 @@
       border-radius: 14px;
       background: rgba(42, 35, 27, 0.46);
       line-height: 1.45;
+    }
+
+    body.v9-expert-mode #section-results #results-state,
+    body.v9-expert-mode #section-results .results-toolbar,
+    body.v9-expert-mode #section-results .results-storage {
+      padding: 0;
+      border: none;
+      background: transparent;
+      font-size: 10px;
+      color: #d9cab3;
+      line-height: 1.3;
     }
 
     body.v9-expert-mode #section-results .results-toolbar {

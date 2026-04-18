@@ -811,24 +811,30 @@
         <span id="result-summary" class="section-hint">Noch kein Bild erstellt</span>
       </div>
       <div class="current-result">
-        <div id="image-state" class="request-state">Noch kein Bild sichtbar</div>
         <img id="image" alt="render output">
+        <div id="image-state" class="result-empty-state">Warte auf Generierung oder lade ein Bild</div>
       </div>
     </section>
 
     <section id="section-results" class="basic-surface basic-surface-results">
       <div class="section-header">
-        <h2>Ergebnisse</h2>
-        <span class="section-hint">Hier findest du deine letzten Bilder mit Vorschau, Download und Wiederverwendung.</span>
+        <h2>Galerie</h2>
+        <span class="section-hint">Deine letzten generierten Bilder</span>
       </div>
-      <div class="results-toolbar">
-        <button id="results-refresh" class="tool-button" type="button">Liste aktualisieren</button>
-        <span id="results-export-state" class="request-state">Optional: Bild in den Exportordner sichern.</span>
-        <span id="results-delete-state" class="request-state">Optional: Bild aus der Hauptliste entfernen.</span>
-      </div>
-      <div id="results-state" class="request-state">Ergebnisliste laedt...</div>
-      <div id="results-storage" class="request-state results-storage">Speicherstatus wird geladen...</div>
+      
+      <!-- GALERIE PROMINENT OBEN -->
       <div id="results-gallery" class="results-gallery"></div>
+      
+      <!-- Status + Toolbar KLEIN und UNTEN -->
+      <div class="results-footer">
+        <div class="results-toolbar">
+          <button id="results-refresh" class="tool-button" type="button">Aktualisieren</button>
+        </div>
+        <div id="results-state" class="result-status-line">–</div>
+        <div id="results-storage" class="result-status-line">–</div>
+        <span id="results-export-state" class="result-status-line"></span>
+        <span id="results-delete-state" class="result-status-line"></span>
+      </div>
     </section>
   </main>
 
