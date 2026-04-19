@@ -60,32 +60,37 @@
       {
         id: "text",
         label: "Schreiben",
-        hint: "Text schreiben, ueberarbeiten und Bildprompts ableiten. Der Schreibbereich ist das Hauptarbeitsobjekt.",
-        section_ids: ["section-text-service-basic"]
+        hint: "Texte schreiben, ueberarbeiten und Bildprompts ableiten.",
+        section_ids: ["section-text-service-basic"],
+        expert_only: false
       },
       {
         id: "create",
         label: "Neues Bild erstellen",
-        hint: "Beschreibe Motiv, Stil, Licht und Stimmung. Dieser Weg ist der normale Start fuer ein neues Bild.",
-        section_ids: ["section-generate"]
+        hint: "Motiv, Stil und Stimmung beschreiben, dann starten.",
+        section_ids: ["section-generate"],
+        expert_only: false
       },
       {
         id: "edit",
         label: "Bild anpassen",
-        hint: "Lade ein Bild und beschreibe eine leichte bis mittlere Aenderung am bestehenden Motiv.",
-        section_ids: ["section-input-images", "section-generate"]
+        hint: "Bild laden und eine leichte bis mittlere Aenderung beschreiben.",
+        section_ids: ["section-input-images", "section-generate"],
+        expert_only: false
       },
       {
         id: "identity-single",
         label: "Sonderpfad: Neue Szene mit derselben Person",
-        hint: "Aktuell nicht verlaesslich freigegeben. Gleiche Person in neuer Szene driftet auf diesem lokalen Stand noch zu stark.",
-        section_ids: ["section-identity-reference"]
+        hint: "Experimentell. Person in neuer Szene driftet auf diesem Stand noch zu stark.",
+        section_ids: ["section-identity-reference"],
+        expert_only: true
       },
       {
         id: "inpaint",
         label: "Bereich im Bild aendern",
-        hint: "Markiere zuerst den Bereich und beschreibe nur dort die Aenderung. Dieser Weg ist fuer lokale Korrekturen gedacht.",
-        section_ids: ["section-input-images", "section-generate"]
+        hint: "Bereich markieren und lokale Aenderung beschreiben.",
+        section_ids: ["section-input-images", "section-generate"],
+        expert_only: true
       }
     ];
     const V7_TASK_CONFIG_BY_ID = Object.fromEntries(
@@ -299,7 +304,8 @@
     );
     const promptEl = document.getElementById("prompt");
     const negativePromptEl = document.getElementById("negative-prompt");
-    // Removed: negativePromptHintEl, standardNegativePromptCopyEl (text hints removed for compact structure)
+    const negativePromptHintEl = document.getElementById("negative-prompt-hint");
+    const standardNegativePromptCopyEl = document.getElementById("standard-negative-prompt-copy");
     const standardNegativePromptRowEl = document.getElementById("standard-negative-prompt-row");
     const useStandardNegativePromptEl = document.getElementById("use-standard-negative-prompt");
     const modeEl = document.getElementById("mode");
@@ -3821,7 +3827,7 @@
         });
 
       if (running) {
-        multiReferenceRunStateEl.textContent = basicMode ? "Bild wird erstellt..." : "Multi-Referenzpfad-Testlauflauf laeuft...";
+        multiReferenceRunStateEl.textContent = basicMode ? "Bild wird erstellt..." : "Multi-Referenzpfad-Testlauf laeuft...";
         multiReferenceRunStateEl.className = "request-state";
       } else if (currentMultiReferenceRequest?.phase === "success") {
         multiReferenceRunStateEl.textContent = basicMode ? "Ergebnis ist fertig" : "Multi-Referenzpfad-Ergebnis bereit";
@@ -3829,7 +3835,7 @@
       } else if (currentMultiReferenceRequest?.phase === "error") {
         multiReferenceRunStateEl.textContent = basicMode
           ? "Erstellung fehlgeschlagen"
-          : `Multi-Referenzpfad-Testlauflauf fehlgeschlagen | ${currentMultiReferenceRequest.blocker || currentMultiReferenceRequest.error_type || "identity_multi_reference_failed"}`;
+          : `Multi-Referenzpfad-Testlauf fehlgeschlagen | ${currentMultiReferenceRequest.blocker || currentMultiReferenceRequest.error_type || "identity_multi_reference_failed"}`;
         multiReferenceRunStateEl.className = basicMode ? "request-state" : "request-state error";
       } else if (!runtimeVerfuegbarkeitView.ready && basicMode && referenceCount < 2) {
         multiReferenceRunStateEl.textContent = "Du brauchst mindestens zwei Referenzbilder derselben Person";
@@ -3843,10 +3849,10 @@
         multiReferenceRunStateEl.textContent = "Gib einen Wunsch ein";
         multiReferenceRunStateEl.className = "request-state";
       } else if (!runtimeVerfuegbarkeitView.ready) {
-        multiReferenceRunStateEl.textContent = "Multi-Referenzpfad-Testlauflauf nicht bereit";
+        multiReferenceRunStateEl.textContent = "Multi-Referenzpfad-Testlauf nicht bereit";
         multiReferenceRunStateEl.className = "request-state";
       } else {
-        multiReferenceRunStateEl.textContent = basicMode ? "Jetzt kannst du starten" : "Multi-Referenzpfad-Testlauflauf bereit";
+        multiReferenceRunStateEl.textContent = basicMode ? "Jetzt kannst du starten" : "Multi-Referenzpfad-Testlauf bereit";
         multiReferenceRunStateEl.className = "request-state";
       }
 
@@ -4825,6 +4831,84 @@
       return resultsState.items.find((item) => item?.result_id === resultId.trim()) || null;
     }
 
+    function isResultsPreviewRoute(url) {
+      return isNonEmptyString(url) && url.trim().startsWith("/results/files/");
+    }
+
+    function buildStoredResultFromListItem(item) {
+      if (!item || typeof item !== "object" || !isNonEmptyString(item.preview_url)) {
+        return null;
+      }
+
+      return {
+        status: "ok",
+        mode: isNonEmptyString(item.mode) ? item.mode.trim() : "txt2img",
+        output_file: item.preview_url.trim(),
+        error_type: null,
+        blocker: null,
+        prompt_id: null,
+        request_id: null,
+        restored_from_storage: true,
+        v7_basic_task: null
+      };
+    }
+
+    function syncCurrentResultFromResults(items) {
+      if (!Array.isArray(items)) {
+        return false;
+      }
+
+      if (currentRequest && (currentRequest.phase === "preflight" || currentRequest.phase === "running")) {
+        return false;
+      }
+
+      const latestItem = items.length > 0 ? items[0] : null;
+      const latestOutput = isNonEmptyString(latestItem?.preview_url) ? latestItem.preview_url.trim() : null;
+      const currentOutput = isNonEmptyString(activeImageContext?.output_file) ? activeImageContext.output_file.trim() : null;
+      const successfulOutput = isNonEmptyString(lastSuccessfulResult?.output_file) ? lastSuccessfulResult.output_file.trim() : null;
+
+      if (!latestOutput) {
+        if (isResultsPreviewRoute(currentOutput) || isResultsPreviewRoute(successfulOutput)) {
+          clearVisibleImage();
+          activeImageContext = createEmptyImageContext();
+          lastSuccessfulResult = null;
+          clear_last_success();
+          if (lastResult?.status === "ok" && isResultsPreviewRoute(lastResult.output_file)) {
+            lastResult = null;
+          }
+          return true;
+        }
+        return false;
+      }
+
+      if (
+        getActiveImageState() === "loading" &&
+        isResultsPreviewRoute(currentOutput) &&
+        currentOutput === latestOutput
+      ) {
+        return false;
+      }
+
+      if (currentOutput === latestOutput && getActiveImageState() !== "error") {
+        return false;
+      }
+
+      const syncedResult = buildStoredResultFromListItem(latestItem);
+      if (!syncedResult) {
+        return false;
+      }
+
+      lastSuccessfulResult = syncedResult;
+      persist_last_success(syncedResult);
+      setActiveImage(syncedResult.output_file, {
+        request_id: null,
+        mode: syncedResult.mode,
+        prompt_id: null,
+        restored_from_storage: true
+      });
+      return true;
+    }
+
     async function fetchResultItemByIdWithRetry(resultId, attempts = 5, delayMs = 400) {
       if (!isNonEmptyString(resultId)) {
         return null;
@@ -5392,13 +5476,13 @@
           identityTransferMaskHybridLimitsEl.textContent = `${maskHybridPromptScopeWarning} Realistische Einzelperson wird fuer Masken-Hybrid empfohlen.`;
           identityTransferMaskHybridLimitsEl.className = "request-state error";
         } else if (maskHybridVerfuegbarkeitView.ready) {
-          identityTransferMaskHybridLimitsEl.textContent = "Geeignet: realistische Einzelperson + sinnvoll gefuellte Kopfmaske. Konturmasken sind meist zu schwach. Fuer maximale Gesichtstreue zuerst Standardpfad pruefen.";
+          identityTransferMaskHybridLimitsEl.textContent = "Bereit. Kopfmaske + Einzelperson empfohlen. Standardpfad fuer maximale Treue.";
           identityTransferMaskHybridLimitsEl.className = "request-state";
         } else if (maskHybridVerfuegbarkeitView.is_error) {
           identityTransferMaskHybridLimitsEl.textContent = `Masken-Hybrid nicht bereit | ${formatIdentityTransferRuntimeBlocker(maskHybridVerfuegbarkeitView.blocker)}`;
           identityTransferMaskHybridLimitsEl.className = "request-state error";
         } else {
-          identityTransferMaskHybridLimitsEl.textContent = "Masken-Hybrid-Spezialpfad wird geprueft. Bereite eine realistische Einzelperson und eine gefuellte Kopfmaske vor.";
+          identityTransferMaskHybridLimitsEl.textContent = "Masken-Hybrid wird geprueft.";
           identityTransferMaskHybridLimitsEl.className = "request-state";
         }
       }
@@ -5473,9 +5557,9 @@
         } else if (activePathMode === "mask_hybrid") {
           identityTransferRunHintEl.textContent = maskHybridPromptScopeWarning
             ? `${maskHybridPromptScopeWarning} Du kannst trotzdem testen, aber Ergebnisse sind oft schwach.`
-            : "Masken-Hybrid-Spezialpfad: fuer gefuellte Kopfmasken und lokale Kopfanpassung. Bei schwankender Gesichtstreue zuerst Standardpfad nutzen.";
+            : "Masken-Hybrid aktiv. Bei schwacher Treue Standardpfad nutzen.";
         } else {
-          identityTransferRunHintEl.textContent = `Standardpfad ist der Default fuer konstante Gesichtstreue | Optionale Rollen vorhanden | Pose: ${optionalRolesPresent.pose_reference === true ? "ja" : "nein"} | Maske: ${optionalRolesPresent.transfer_mask === true ? "ja" : "nein"}`;
+          identityTransferRunHintEl.textContent = `Standardpfad | Pose: ${optionalRolesPresent.pose_reference === true ? "ja" : "nein"} | Maske: ${optionalRolesPresent.transfer_mask === true ? "ja" : "nein"}`;
         }
         identityTransferRunHintEl.className = "request-state";
       } else {
@@ -5491,7 +5575,7 @@
       } else if (standardVerfuegbarkeitView.ready) {
         identityTransferTestHintEl.textContent = basicMode
           ? "Der stabile Pfad nutzt aktuell Kopf-Referenzbild plus Zielbild."
-          : "Stabiler Standardpfadpfad nutzt aktuell Kopf-Referenzbild plus Zielbild.";
+          : "Stabiler Standardpfad nutzt aktuell Kopf-Referenzbild plus Zielbild.";
         identityTransferTestHintEl.className = "request-state";
       } else {
         identityTransferTestHintEl.textContent = "Pflichtbilder: Kopf-Referenzbild und Zielbild.";
@@ -7184,11 +7268,10 @@
       }
 
       useStandardNegativePromptEl.checked = basicTaskStandardNegativeEnabled[taskId] === true;
-      // Only update if element exists (new compact structure may not have this)
       if (standardNegativePromptCopyEl) {
         standardNegativePromptCopyEl.textContent = useStandardNegativePromptEl.checked
-          ? `Aktiv setzt optional: ${STANDARD_NEGATIVE_PROMPT_TEXT}`
-          : "Deaktiviert: Das Feld bleibt komplett unter deiner Kontrolle.";
+          ? `Standard aktiv: ${STANDARD_NEGATIVE_PROMPT_TEXT}`
+          : "";
       }
     }
 
@@ -7246,37 +7329,25 @@
       renderStandardNegativePromptControl(taskId, basicMode);
 
       if (!basicMode || !BASIC_IMAGE_TASK_IDS.includes(taskId)) {
-        negativePromptEl.placeholder = "Optional: Elemente oder Artefakte, die vermieden werden sollen.";
-        if (negativePromptHintEl) negativePromptHintEl.textContent = "Optional: Beschreibe kurz, was im Bild vermieden werden soll.";
+        negativePromptEl.placeholder = "Optional: Was soll im Bild vermieden werden?";
+        if (negativePromptHintEl) negativePromptHintEl.textContent = "";
         return;
       }
 
       if (taskId === "create") {
         negativePromptEl.placeholder = "z. B. unscharf, low quality, chaotischer Hintergrund";
-        if (negativePromptHintEl) {
-          negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.create === true
-            ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar und abschaltbar."
-            : "Optional: Unerwuenschte Bildanteile beim neuen Bild vermeiden.";
-        }
+        if (negativePromptHintEl) negativePromptHintEl.textContent = "";
         return;
       }
 
       if (taskId === "edit") {
-        negativePromptEl.placeholder = "z. B. keine neue Person, kein Hintergrundchaos, nicht unscharf";
-        if (negativePromptHintEl) {
-          negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.edit === true
-            ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar und wird nicht staendig ueberschrieben."
-            : "Optional: Hilft, das Ausgangsbild ruhiger zu erhalten.";
-        }
+        negativePromptEl.placeholder = "z. B. keine neue Person, nicht unscharf";
+        if (negativePromptHintEl) negativePromptHintEl.textContent = "";
         return;
       }
 
-      negativePromptEl.placeholder = "z. B. keine Aenderung ausserhalb der Maske, keine Unschaerfe";
-      if (negativePromptHintEl) {
-        negativePromptHintEl.textContent = basicTaskStandardNegativeEnabled.inpaint === true
-          ? "Der Standard-Negativprompt ist aktiv, bleibt aber editierbar. Fuer groessere Inpaint-Faelle lieber ruhig und gezielt bleiben."
-          : "Optional: Hilft, die Aenderung lokaler im markierten Bereich zu halten.";
-      }
+      negativePromptEl.placeholder = "z. B. keine Aenderung ausserhalb der Maske";
+      if (negativePromptHintEl) negativePromptHintEl.textContent = "";
     }
 
     function renderV7GenerateActiveInputContext(taskId, basicMode) {
@@ -7333,10 +7404,17 @@
       const basicMode = isV7BasicModeActive();
       const taskId = getCurrentV7TaskConfig().id;
       const styleConfig = getCurrentBasicImageStyleConfig();
+      const isImageTask = ["create", "edit", "inpaint"].includes(taskId);
+
+      // Block B: Negative prompt visible for all image tasks
+      if (negativPromptBlockEl) {
+        negativPromptBlockEl.hidden = !(isImageTask || !basicMode);
+      }
+
       renderNegativePromptGuidance(taskId, basicMode);
       renderV7GenerateActiveInputContext(taskId, basicMode);
 
-      if (!basicMode || !["create", "edit", "inpaint"].includes(taskId)) {
+      if (!basicMode || !isImageTask) {
         generateSectionTitleEl.textContent = "Bild erstellen";
         // Removed verbose section hint (text reduction for compact UI)
         setGuidedTaskNote(generateBasicGuideEl, null, null, false);
@@ -7365,11 +7443,10 @@
 
       if (taskId === "create") {
         generateSectionTitleEl.textContent = "Neues Bild erstellen";
-        // Removed verbose section hint
         setGuidedTaskNote(
           generateBasicGuideEl,
-          "1. Prompt schreiben",
-          `${styleConfig.label} ist aktiv und steuert den Bildstil. Schreibe am besten Motiv + Stil + Licht/Stimmung in einem Satz, z. B. "Portrait bei warmem Abendlicht". Danach kannst du direkt starten.`,
+          "Prompt schreiben",
+          `${styleConfig.label}-Modus aktiv. Motiv, Stil und Stimmung beschreiben, dann starten.`,
           true
         );
         return;
@@ -7377,22 +7454,20 @@
 
       if (taskId === "edit") {
         generateSectionTitleEl.textContent = "Bild anpassen";
-        // Removed verbose section hint
         setGuidedTaskNote(
           generateBasicGuideEl,
-          "2. Aenderung beschreiben",
-          `${styleConfig.label} ist aktiv und steuert, ob die Aenderung eher realistisch oder stilisiert wirkt. Kleine, klare Aenderungen funktionieren oft besser als eine komplette Neuschreibung (z. B. "Jacke rot", "Licht waermer"). Fuer neue Szene oder neue Pose derselben Person wechsle in den getrennten Expertenbereich. Starte bei Aenderungsstaerke 0.25 und erhoehe nur bei Bedarf.`,
+          "Aenderung beschreiben",
+          `${styleConfig.label}-Modus aktiv. Kleine, klare Aenderungen funktionieren besser als komplette Neuschreibung.`,
           true
         );
         return;
       }
 
       generateSectionTitleEl.textContent = "Bereich im Bild aendern";
-      // Removed verbose section hint
       setGuidedTaskNote(
         generateBasicGuideEl,
-        "3. Bereich beschreiben",
-        `${styleConfig.label} ist aktiv und steuert den Stil des geaenderten Bereichs. Beschreibe nur die lokale Aenderung im markierten Bereich (z. B. "Himmel als Sonnenuntergang", "kleines Objekt ersetzen", "Detail lokal korrigieren"). Der Rest soll moeglichst stehenbleiben. Starte bei Aenderungsstaerke 0.58. Fuer feinere Details eher etwas niedriger. Groessere Kleidungs-/Farbwechsel mit gleicher Form sind auf dem aktuellen lokalen Stand nicht verlaesslich genug.`,
+        "Bereich beschreiben",
+        `${styleConfig.label}-Modus aktiv. Nur die lokale Aenderung im markierten Bereich beschreiben.`,
         true
       );
     }
@@ -7402,20 +7477,15 @@
       const taskId = getCurrentV7TaskConfig().id;
       const userState = getTextServiceUserState();
       if (!basicMode || taskId !== "text") {
-        textServiceBasicSectionTitleEl.textContent = "Schreiben und Ueberarbeiten";
-        textServiceBasicSectionHintEl.textContent = "Textkoerper schreiben, ueberarbeiten und Bildprompts ableiten";
+        textServiceBasicSectionTitleEl.textContent = "Schreiben";
+        textServiceBasicSectionHintEl.textContent = "Texte schreiben, ueberarbeiten und Bildprompts ableiten";
         setGuidedTaskNote(textServiceBasicGuideEl, null, null, false);
         return;
       }
 
-      textServiceBasicSectionTitleEl.textContent = "Schreiben und Ueberarbeiten";
+      textServiceBasicSectionTitleEl.textContent = "Schreiben";
       textServiceBasicSectionHintEl.textContent = userState.focus_hint;
-      setGuidedTaskNote(
-        textServiceBasicGuideEl,
-        "Text eingeben, ueberarbeiten oder als Bildprompt ableiten",
-        userState.guide_detail,
-        true
-      );
+      setGuidedTaskNote(textServiceBasicGuideEl, null, null, false);
     }
 
     function deriveBasicTextTaskLeadView() {
@@ -7496,14 +7566,9 @@
 
       if (taskId === "create") {
         basicTaskFocusTitleEl.textContent = "Neues Bild erstellen";
-        basicTaskFocusHintEl.textContent = "Beschreibe kurz Motiv, Stil, Licht und Stimmung. Danach kannst du direkt starten.";
-        setGuidedTaskNote(
-          basicTaskFocusNoteEl,
-          "Du brauchst nur einen Prompt",
-          `Schreibe kurz, was auf dem Bild zu sehen sein soll und wie es wirken soll. Foto wirkt realistischer, Anime ist ein freierer Stilmodus derselben Idee. Beispielrichtung: "Portrait bei weichem Abendlicht".`,
-          true
-        );
-        basicTaskFocusExtraEl.textContent = `${getCurrentBasicImageStyleConfig().label} ist aktiv und steuert die Bildwelt direkt vor dem Start.`;
+        basicTaskFocusHintEl.textContent = "Motiv, Stil und Stimmung beschreiben, dann starten.";
+        setGuidedTaskNote(basicTaskFocusNoteEl, null, null, false);
+        basicTaskFocusExtraEl.textContent = `${getCurrentBasicImageStyleConfig().label}-Modus aktiv.`;
         return;
       }
 
@@ -7511,77 +7576,52 @@
         const leadView = deriveBasicTextTaskLeadView();
         const userState = getTextServiceUserState();
         basicTaskFocusExtraEl.className = leadView.is_error ? "request-state error" : "request-state";
-        basicTaskFocusTitleEl.textContent = "Text schreiben / Text-KI nutzen";
+        basicTaskFocusTitleEl.textContent = "Schreiben";
         basicTaskFocusHintEl.textContent = userState.focus_hint;
-        setGuidedTaskNote(
-          basicTaskFocusNoteEl,
-          "Du brauchst nur deinen Text",
-          userState.guide_detail,
-          true
-        );
+        setGuidedTaskNote(basicTaskFocusNoteEl, null, null, false);
         basicTaskFocusExtraEl.textContent = leadView.text;
         return;
       }
 
       if (taskId === "edit") {
         basicTaskFocusTitleEl.textContent = "Bild anpassen";
-        basicTaskFocusHintEl.textContent = "Bild laden, Aenderung beschreiben, mit 0.30 starten und nur bei Bedarf staerker gehen.";
-        setGuidedTaskNote(
-          basicTaskFocusNoteEl,
-          "Du brauchst ein Bild",
-          `Lade zuerst ein Bild hoch. Das Ausgangsbild bleibt die Basis. Kleine Aenderungen wie "Jacke rot" oder "Licht waermer" sind meist stabiler als ein kompletter Neuaufbau. Fuer neue Pose oder neue Szene derselben Person gibt es aktuell nur einen Sonderpfad im Expertenbereich.`,
-          true
-        );
-        basicTaskFocusExtraEl.textContent = `${getCurrentBasicImageStyleConfig().label} ist aktiv. 0.30 wirkt meist stabiler, hoehere Werte greifen staerker in das Ursprungsbild ein.`;
+        basicTaskFocusHintEl.textContent = "Bild laden, Aenderung beschreiben, starten.";
+        setGuidedTaskNote(basicTaskFocusNoteEl, null, null, false);
+        basicTaskFocusExtraEl.textContent = `${getCurrentBasicImageStyleConfig().label}-Modus aktiv.`;
         basicTaskFocusActionsEl.hidden = false;
         basicTaskOpenExpertEl.textContent = "Im Expertenbereich oeffnen";
         basicTaskOpenExpertEl.dataset.action = "open_expert";
         basicTaskOpenExpertEl.dataset.targetTask = "";
-        basicTaskOpenExpertHintEl.textContent = "Der Szenenpfad mit derselben Person ist aktuell nur als Sonderpfad verfuegbar und noch nicht verlaesslich freigegeben.";
+        basicTaskOpenExpertHintEl.textContent = "";
         return;
       }
 
       if (taskId === "identity-single") {
         basicTaskFocusTitleEl.textContent = "Sonderpfad: Neue Szene mit derselben Person";
-        basicTaskFocusHintEl.textContent = "Aktuell nicht verlaesslich freigegeben. Gleiche Person in neuer Szene driftet auf diesem lokalen Stand noch zu stark.";
-        setGuidedTaskNote(
-          basicTaskFocusNoteEl,
-          "Referenz-Sonderpfad",
-          "Dieser Modus bleibt technisch erreichbar, ist aber aktuell nicht stabil genug fuer einen verlaesslichen Produktlauf. Nutze ihn nur fuer gezielte Tests, nicht fuer belastbare gleiche-Person-Ergebnisse.",
-          true
-        );
-        basicTaskFocusExtraEl.textContent = `${getCurrentIdentitySingleImageStyleConfig().label} ist aktiv. Foto und Anime laufen technisch, halten die Person aber derzeit nicht verlaesslich genug.`;
+        basicTaskFocusHintEl.textContent = "Experimentell. Person driftet auf diesem Stand noch zu stark.";
+        setGuidedTaskNote(basicTaskFocusNoteEl, null, null, false);
+        basicTaskFocusExtraEl.textContent = `${getCurrentIdentitySingleImageStyleConfig().label}-Modus aktiv.`;
         basicTaskFocusActionsEl.hidden = false;
         basicTaskOpenExpertEl.textContent = "Zur Aufgabe Bild anpassen";
         basicTaskOpenExpertEl.dataset.action = "switch_task";
         basicTaskOpenExpertEl.dataset.targetTask = "edit";
-        basicTaskOpenExpertHintEl.textContent = "Nutze Bild anpassen fuer den verlaesslicheren Hauptpfad bei leichten bis mittleren Aenderungen.";
+        basicTaskOpenExpertHintEl.textContent = "";
         return;
       }
 
       if (taskId === "inpaint") {
         basicTaskFocusTitleEl.textContent = "Bereich im Bild aendern";
-        basicTaskFocusHintEl.textContent = "Bild laden, Bereich markieren, lokale Aenderung beschreiben, mit 0.58 starten.";
-        setGuidedTaskNote(
-          basicTaskFocusNoteEl,
-          "Du brauchst Bild plus Maske",
-          `Lade zuerst dein Bild. Danach markierst du den Bereich und beschreibst nur die Aenderung dort, z. B. "ersetze den Himmel durch Sonnenuntergang" oder "kleines Objekt lokal austauschen". Dieser Modus ist aktuell am brauchbarsten fuer kleinere lokale Korrekturen und klar begrenzte Teilbereichswechsel. Grosse Kleidungs-/Farbwechsel mit Form-Erhalt sind auf diesem lokalen Stand nicht verlaesslich genug.`,
-          true
-        );
-        basicTaskFocusExtraEl.textContent = `${getCurrentBasicImageStyleConfig().label} ist aktiv. 0.58 trifft lokale Maskenaenderungen meist besser; fuer feinere Korrekturen etwas niedriger. Fuer grosse Kleidungsflaechen mit gleicher Form ist dieser Modus aktuell nur eingeschraenkt verlaesslich.`;
+        basicTaskFocusHintEl.textContent = "Bild laden, Bereich markieren, lokale Aenderung beschreiben.";
+        setGuidedTaskNote(basicTaskFocusNoteEl, null, null, false);
+        basicTaskFocusExtraEl.textContent = `${getCurrentBasicImageStyleConfig().label}-Modus aktiv.`;
         return;
       }
 
       const leadView = deriveBasicTextTaskLeadView();
       basicTaskFocusExtraEl.className = leadView.is_error ? "request-state error" : "request-state";
-      basicTaskFocusTitleEl.textContent = "Text schreiben / Text-KI nutzen";
-      basicTaskFocusHintEl.textContent = "Nutze die Text-KI fuer Texte, Umformulierungen und Bildprompts.";
-      setGuidedTaskNote(
-        basicTaskFocusNoteEl,
-        "Du brauchst nur deinen Text",
-        "Wenn die Antwort als Bildprompt passt, kannst du sie direkt in den Bildgenerator uebernehmen.",
-        true
-      );
+      basicTaskFocusTitleEl.textContent = "Schreiben";
+      basicTaskFocusHintEl.textContent = "Texte schreiben, ueberarbeiten und als Bildprompt nutzen.";
+      setGuidedTaskNote(basicTaskFocusNoteEl, null, null, false);
       basicTaskFocusExtraEl.textContent = leadView.text;
       basicTaskFocusActionsEl.hidden = true;
       basicTaskOpenExpertHintEl.textContent = "";
@@ -7591,7 +7631,7 @@
       const basicMode = isV7BasicModeActive();
       const taskId = getCurrentV7TaskConfig().id;
 
-      if (!basicMode || !["edit", "inpaint"].includes(taskId)) {
+      if (!basicMode) {
         inputImagesSectionTitleEl.textContent = "Eingabebilder";
         inputImagesSectionHintEl.textContent = "Bild fuer Aenderungen, bei Bedarf mit Maske";
         setGuidedTaskNote(inputImagesBasicGuideEl, null, null, false);
@@ -7600,29 +7640,28 @@
         return;
       }
 
+      if (!["edit", "inpaint"].includes(taskId)) {
+        inputImagesSectionTitleEl.textContent = "Eingabebilder";
+        inputImagesSectionHintEl.textContent = "Dieser Schritt ist fuer diese Aufgabe nicht noetig.";
+        setGuidedTaskNote(inputImagesBasicGuideEl, null, null, false);
+        inputCardSourceEl.hidden = true;
+        inputCardMaskEl.hidden = true;
+        return;
+      }
+
       inputCardSourceEl.hidden = false;
       inputCardMaskEl.hidden = taskId !== "inpaint";
 
       if (taskId === "edit") {
         inputImagesSectionTitleEl.textContent = "Ausgangsbild";
-        inputImagesSectionHintEl.textContent = "Lade das Bild, das du veraendern willst. Fuer neue Pose/Szene derselben Person nutze den Szenenpfad.";
-        setGuidedTaskNote(
-          inputImagesBasicGuideEl,
-          "1. Bild laden",
-          "Du brauchst nur ein Bild als Ausgangspunkt. Dieser Weg ist fuer leichte bis mittlere Aenderungen am bestehenden Bild.",
-          true
-        );
+        inputImagesSectionHintEl.textContent = "Bild laden, das veraendert werden soll.";
+        setGuidedTaskNote(inputImagesBasicGuideEl, null, null, false);
         return;
       }
 
       inputImagesSectionTitleEl.textContent = "Bild und Bereich";
-      inputImagesSectionHintEl.textContent = "Lade dein Bild und markiere den Bereich, der geaendert werden soll.";
-      setGuidedTaskNote(
-        inputImagesBasicGuideEl,
-        "1. Bild laden, 2. Bereich markieren",
-        "Nutze danach Upload oder Masken-Editor, um nur den gewuenschten Bereich zu markieren.",
-        true
-      );
+      inputImagesSectionHintEl.textContent = "Bild laden und Bereich markieren.";
+      setGuidedTaskNote(inputImagesBasicGuideEl, null, null, false);
     }
 
     function renderV7IdentityReferenceSectionUi() {
@@ -7650,13 +7689,13 @@
       const styleConfig = getCurrentIdentitySingleImageStyleConfig();
       sectionIdentityReferenceEl.classList.add("basic-surface", "basic-surface-work");
       identityReferenceSectionTitleEl.textContent = "Sonderpfad: Neue Szene mit derselben Person";
-      identityReferenceSectionHintEl.textContent = "Aktuell nicht verlaesslich freigegeben. Gleiche Person in neuer Szene oder Pose ist auf diesem lokalen Stand noch nicht stabil genug.";
+      identityReferenceSectionHintEl.textContent = "Experimentell – noch nicht stabil freigegeben.";
       identityReferenceCardTitleEl.textContent = "Referenzbild";
-      identityReferenceCardCopyEl.textContent = "Lade ein Bild derselben Person hoch, wenn du den Referenz-Sonderpfad trotzdem pruefen willst.";
+      identityReferenceCardCopyEl.textContent = "Lade ein Referenzbild hoch.";
       identityRunCardTitleEl.textContent = "Sonderpfad-Lauf";
       identityRunCardCopyEl.textContent = currentIdentitySingleImageStyle === "anime"
-        ? "Anime ist aktiv. Der Lauf ist aktuell nur als Sonderpfad verfuegbar und stilisiert die Person oft zu frei. Keine verlaessliche gleiche-Person-Erwartung."
-        : "Foto ist aktiv. Der Lauf ist aktuell nur als Sonderpfad verfuegbar und haelt dieselbe Person in neuer Szene noch nicht verlaesslich genug.";
+        ? "Anime aktiv. Stilisiert die Person oft zu frei – keine verlaessliche Gesichtstreue."
+        : "Foto aktiv. Gleiche Person in neuer Szene noch nicht verlaesslich.";
       uploadIdentityReferenceEl.textContent = "Referenzbild laden";
       resetIdentityReferenceEl.textContent = "Referenzbild entfernen";
       identityGenerateEl.textContent = "Sonderpfad starten";
@@ -7819,16 +7858,22 @@
       guidedModeBasicEl.classList.toggle("active", !expertModeActive);
       guidedModeExpertEl.classList.toggle("active", expertModeActive);
       guidedModeStateEl.textContent = expertModeActive
-        ? "Erweitert | Sonderpfade und Tests sind sichtbar."
-        : `Basismodus | ${taskConfig.label} als Hauptpfad`;
+        ? "Erweiterter Modus"
+        : `${taskConfig.label}`;
       guidedTaskHintEl.textContent = expertModeActive
-        ? "Hier bleiben Personen-/Szenen-Sonderpfade, technische Tests und Spezialstarts bewusst getrennt vom Basismodus erreichbar."
+        ? "Sonderpfade, Tests und Spezialstarts."
         : taskConfig.hint;
       guidedTaskHintEl.className = "request-state";
       V7_TASK_CONFIG.forEach((config) => {
         const button = guidedTaskButtonEls[config.id];
         if (!button) {
           return;
+        }
+        // Hide expert_only tasks in basic mode task grid
+        if (!expertModeActive && config.expert_only) {
+          button.hidden = true;
+        } else {
+          button.hidden = false;
         }
         button.classList.toggle("active", config.id === taskConfig.id);
       });
@@ -8779,10 +8824,12 @@
           return null;
         }
 
+        const normalizedItems = payload.items
+          .map((item) => normalizeResultItem(item))
+          .filter((item) => item !== null);
+
         resultsState = {
-          items: payload.items
-            .map((item) => normalizeResultItem(item))
-            .filter((item) => item !== null),
+          items: normalizedItems,
           loading: false,
           error: null,
           initialized: true,
@@ -8796,6 +8843,7 @@
             : limit,
           storage: normalizeResultsStorage(payload.storage)
         };
+        syncCurrentResultFromResults(normalizedItems);
         renderUi();
         return resultsState.items;
       } catch (error) {
@@ -12448,9 +12496,11 @@
       const systemSummary = buildSystemSummaryView();
       const resultSummary = buildResultSummaryView();
 
-      systemSummaryEl.hidden = systemSummary.hidden === true;
-      systemSummaryEl.textContent = systemSummary.text;
-      systemSummaryEl.className = systemSummary.is_error ? "status-line error" : "status-line";
+      if (systemSummaryEl) {
+        systemSummaryEl.hidden = systemSummary.hidden === true;
+        systemSummaryEl.textContent = systemSummary.text;
+        systemSummaryEl.className = systemSummary.is_error ? "status-line error" : "status-line";
+      }
 
       resultSummaryEl.textContent = resultSummary.text;
       resultSummaryEl.className = resultSummary.is_error ? "section-hint error" : "section-hint";
@@ -12501,8 +12551,10 @@
               text: "Bereit",
               is_error: false
             });
-      actionFeedbackEl.textContent = activeFeedback.text;
-      actionFeedbackEl.className = activeFeedback.is_error ? "status-line error" : "status-line";
+      if (actionFeedbackEl) {
+        actionFeedbackEl.textContent = activeFeedback.text;
+        actionFeedbackEl.className = activeFeedback.is_error ? "status-line error" : "status-line";
+      }
       const basicProgressActive = renderGenerateProgressUi();
       renderUploadUi();
       renderIdentityTestUi();
@@ -13807,7 +13859,3 @@
     void fetchResults();
     scheduleHealthPoll();
   
-
-
-
-

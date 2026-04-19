@@ -3629,14 +3629,14 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             self.send_json(*busy_response)
             return
 
-        (
-            response_status,
-            response_payload,
-        ) = generate_endpoint_flow.execute_generate_endpoint(
+        workflow_name = prepared.get("workflow")
+        workflow_override = workflow_name if isinstance(workflow_name, str) and workflow_name.strip() else None
+
+        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
             render_callable=lambda: run_render(
                 prompt=str(render_request["render_prompt"]),
                 mode=mode,
-                workflow=str(prepared["workflow"]),
+                workflow=workflow_override,
                 checkpoint=checkpoint,
                 negative_prompt=(
                     render_request["negative_prompt_value"]

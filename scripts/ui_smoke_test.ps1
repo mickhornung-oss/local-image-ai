@@ -172,6 +172,48 @@ function Invoke-CdpEvaluate {
     return $response.result.result.value
 }
 
+function Wait-CdpCondition {
+    param(
+        [Parameter(Mandatory = $true)][System.Net.WebSockets.ClientWebSocket]$Socket,
+        [Parameter(Mandatory = $true)][ref]$NextId,
+        [Parameter(Mandatory = $true)][string]$Expression,
+        [int]$TimeoutMs = 8000,
+        [int]$PollMs = 250,
+        [bool]$AwaitPromise = $false
+    )
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    $lastValue = $null
+
+    while ((Get-Date) -lt $deadline) {
+        $value = Invoke-CdpEvaluate -Socket $Socket -NextId $NextId -Expression $Expression -AwaitPromise $AwaitPromise
+        $lastValue = $value
+
+        if ($value -is [bool]) {
+            if ($value) {
+                return [pscustomobject]@{ ok = $true; detail = $null }
+            }
+        } elseif ($value -and ($value.PSObject.Properties.Name -contains "ok")) {
+            if ($value.ok -eq $true) {
+                return $value
+            }
+        } elseif ($null -ne $value) {
+            return [pscustomobject]@{ ok = $true; detail = "$value" }
+        }
+
+        Start-Sleep -Milliseconds $PollMs
+    }
+
+    if ($lastValue -and ($lastValue.PSObject.Properties.Name -contains "ok")) {
+        return $lastValue
+    }
+    return [pscustomobject]@{
+        ok = $false
+        blocker = "wait_condition_timeout"
+        detail = "timeout_${TimeoutMs}ms"
+    }
+}
+
 function Start-InteractiveEdgeSession {
     param(
         [Parameter(Mandatory = $true)][string]$EdgePath,
@@ -194,9 +236,6 @@ function Start-InteractiveEdgeSession {
             $targets = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2
             $pages = @($targets | Where-Object { $_.type -eq "page" -and $_.webSocketDebuggerUrl })
             $target = @($pages | Where-Object { "$($_.url)" -like "$BaseUrl*" }) | Select-Object -First 1
-            if (-not $target) {
-                $target = $pages | Select-Object -First 1
-            }
             if ($target) {
                 break
             }
@@ -270,7 +309,25 @@ function Invoke-InteractiveUiChecks {
         $null = Invoke-CdpCommand -Socket $session.socket -Id $nextId -Method "Runtime.enable"
         $nextId++
 
-        Start-Sleep -Milliseconds 1200
+        $pageReady = Wait-CdpCondition -Socket $session.socket -NextId ([ref]$nextId) -TimeoutMs ([Math]::Max(4000, $TimeoutSeconds * 1000)) -PollMs 250 -Expression @'
+(() => {
+  const ready = document.readyState === "complete";
+  const createButton = document.getElementById("guided-task-create");
+  const gallery = document.getElementById("results-gallery");
+  const systemSummary = document.getElementById("system-summary");
+  const systemText = systemSummary ? systemSummary.textContent.trim() : "";
+  const systemHealthy =
+    systemText.length > 0 &&
+    !/System wird geladen/i.test(systemText) &&
+    !/nicht erreichbar/i.test(systemText) &&
+    !/wird vorbereitet/i.test(systemText) &&
+    !/nicht verfuegbar/i.test(systemText);
+  return {
+    ok: ready && (createButton instanceof HTMLButtonElement) && Boolean(gallery) && systemHealthy,
+    detail: `${document.readyState} | ${systemText || "kein system-summary"}`
+  };
+})()
+'@
 
         $createTask = Invoke-CdpEvaluate -Socket $session.socket -NextId ([ref]$nextId) -Expression @'
 (() => {
@@ -287,7 +344,23 @@ function Invoke-InteractiveUiChecks {
 })()
 '@
 
-        Start-Sleep -Milliseconds 600
+        $previewReady = Wait-CdpCondition -Socket $session.socket -NextId ([ref]$nextId) -TimeoutMs ([Math]::Max(5000, $TimeoutSeconds * 1000)) -PollMs 250 -Expression @'
+(() => {
+  const buttons = document.querySelectorAll(".result-preview-button");
+  const stateEl = document.getElementById("results-state");
+  const stateText = stateEl ? stateEl.textContent.trim() : "";
+  if (buttons.length > 0) {
+    return { ok: true, detail: `${buttons.length} Vorschau-Buttons sichtbar` };
+  }
+  if (/Noch keine gespeicherten Ergebnisse/i.test(stateText)) {
+    return { ok: false, blocker: "result_list_empty", detail: stateText };
+  }
+  if (/nicht verfuegbar/i.test(stateText)) {
+    return { ok: false, blocker: "result_list_unavailable", detail: stateText };
+  }
+  return { ok: false, blocker: "result_preview_button_pending", detail: stateText || "results_state_missing" };
+})()
+'@
 
         $previewOpen = Invoke-CdpEvaluate -Socket $session.socket -NextId ([ref]$nextId) -Expression @'
 (() => {
@@ -305,7 +378,23 @@ function Invoke-InteractiveUiChecks {
 })()
 '@
 
-        Start-Sleep -Milliseconds 400
+        $loadInputReady = Wait-CdpCondition -Socket $session.socket -NextId ([ref]$nextId) -TimeoutMs 5000 -PollMs 200 -Expression @'
+(() => {
+  const modal = document.getElementById("results-preview-modal");
+  const button = document.getElementById("results-preview-load-input");
+  const state = document.getElementById("generate-active-input-context");
+  if (!(button instanceof HTMLButtonElement)) {
+    return { ok: false, blocker: "result_load_input_button_missing" };
+  }
+  if (!modal || modal.hidden) {
+    return { ok: false, blocker: "result_preview_modal_closed" };
+  }
+  if (button.disabled) {
+    return { ok: false, blocker: "result_load_input_disabled_waiting" };
+  }
+  return { ok: true, detail: state && state.hidden === false ? "active_input_already_visible" : "ready" };
+})()
+'@
 
         $loadAsInput = Invoke-CdpEvaluate -Socket $session.socket -NextId ([ref]$nextId) -AwaitPromise $true -Expression @'
 (async () => {
@@ -327,6 +416,34 @@ function Invoke-InteractiveUiChecks {
   return {
     ok: Boolean(activeInputContext) && activeInputContext.hidden === false && Boolean(sectionTitle) && sectionTitle.textContent.trim() === "Bild anpassen",
     detail: activeInputMeta ? activeInputMeta.textContent.trim() : ""
+  };
+})()
+'@
+
+        $modeSeparation = Invoke-CdpEvaluate -Socket $session.socket -NextId ([ref]$nextId) -Expression @'
+(() => {
+  const click = (id) => {
+    const button = document.getElementById(id);
+    if (!(button instanceof HTMLButtonElement)) {
+      return false;
+    }
+    button.click();
+    return true;
+  };
+  const title = document.getElementById("generate-section-title");
+  const maskCard = document.getElementById("input-card-mask");
+  if (!title || !maskCard) {
+    return { ok: false, blocker: "mode_separation_dom_missing" };
+  }
+  const editClicked = click("guided-task-edit");
+  const editOk = editClicked && title.textContent.trim() === "Bild anpassen" && maskCard.hidden === true;
+  const inpaintClicked = click("guided-task-inpaint");
+  const inpaintOk = inpaintClicked && title.textContent.trim() === "Bereich im Bild aendern" && maskCard.hidden === false;
+  const createClicked = click("guided-task-create");
+  const createOk = createClicked && title.textContent.trim() === "Neues Bild erstellen" && maskCard.hidden === true;
+  return {
+    ok: editOk && inpaintOk && createOk,
+    detail: `edit=${editOk} | inpaint=${inpaintOk} | create=${createOk} | title=${title.textContent.trim()} | maskHidden=${maskCard.hidden}`
   };
 })()
 '@
@@ -497,9 +614,13 @@ function Invoke-InteractiveUiChecks {
 '@
 
         return @(
+            (New-UiCheck -Name "klickpfad-app-bereit" -Ok ($pageReady.ok -eq $true) -Detail (Get-UiCheckDetail -Value $pageReady)),
             (New-UiCheck -Name "klickpfad-bild-hauptpfad" -Ok ($createTask.ok -eq $true) -Detail (Get-UiCheckDetail -Value $createTask)),
+            (New-UiCheck -Name "klickpfad-ergebnisliste-bereit" -Ok ($previewReady.ok -eq $true) -Detail (Get-UiCheckDetail -Value $previewReady)),
             (New-UiCheck -Name "klickpfad-ergebnisvorschau" -Ok ($previewOpen.ok -eq $true) -Detail (Get-UiCheckDetail -Value $previewOpen)),
+            (New-UiCheck -Name "klickpfad-preview-aktion-bereit" -Ok ($loadInputReady.ok -eq $true) -Detail (Get-UiCheckDetail -Value $loadInputReady)),
             (New-UiCheck -Name "klickpfad-als-eingabebild" -Ok ($loadAsInput.ok -eq $true) -Detail (Get-UiCheckDetail -Value $loadAsInput)),
+            (New-UiCheck -Name "klickpfad-modustrennung" -Ok ($modeSeparation.ok -eq $true) -Detail (Get-UiCheckDetail -Value $modeSeparation)),
             (New-UiCheck -Name "klickpfad-text-hauptpfad" -Ok ($textRoundtrip.ok -eq $true) -Detail (Get-UiCheckDetail -Value $textRoundtrip))
         )
     } finally {
@@ -555,7 +676,10 @@ try {
         (New-UiCheck -Name "startseite" -Ok ($html -match "<title>StoryForge Local</title>") -Detail "HTML geladen"),
         (New-UiCheck -Name "systemstatus" -Ok (
             -not [string]::IsNullOrWhiteSpace($systemSummary) -and
-            $systemSummary -notmatch "System wird geladen"
+            $systemSummary -notmatch "System wird geladen" -and
+            $systemSummary -notmatch "nicht erreichbar" -and
+            $systemSummary -notmatch "wird vorbereitet" -and
+            $systemSummary -notmatch "nicht verfuegbar"
         ) -Detail $systemSummary),
         (New-UiCheck -Name "bild-hauptpfad" -Ok (
             -not [string]::IsNullOrWhiteSpace($requestState) -and

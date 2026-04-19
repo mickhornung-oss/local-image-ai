@@ -23,15 +23,15 @@
           </div>
         </div>
         <div class="guided-copy">
-          <div id="guided-mode-state" class="request-state">Basismodus fuer den normalen Produktweg</div>
-          <div id="guided-task-hint" class="request-state">Waehle eine Hauptaufgabe. Danach zeigen wir nur die noetigen Schritte fuer diesen Weg.</div>
+          <div id="guided-mode-state" class="request-state"></div>
+          <div id="guided-task-hint" class="request-state"></div>
         </div>
         <div id="guided-task-area">
           <div class="task-grid">
             <button id="guided-task-text" class="task-button active" type="button">Schreiben</button>
             <button id="guided-task-create" class="task-button" type="button">Neues Bild erstellen</button>
             <button id="guided-task-edit" class="task-button" type="button">Bild anpassen</button>
-            <button id="guided-task-inpaint" class="task-button" type="button">Bereich im Bild aendern</button>
+            <button id="guided-task-inpaint" class="task-button" type="button" hidden>Bereich im Bild aendern</button>
           </div>
         </div>
       </div>
@@ -39,8 +39,8 @@
 
     <section id="section-basic-task-focus" class="mode-shell basic basic-surface basic-surface-focus">
       <div class="section-header">
-        <h2 id="basic-task-focus-title">Einfach starten</h2>
-        <span id="basic-task-focus-hint" class="section-hint">Waehle eine Aufgabe und folge den noetigen Schritten.</span>
+        <h2 id="basic-task-focus-title">Aufgabe</h2>
+        <span id="basic-task-focus-hint" class="section-hint"></span>
       </div>
       <div id="basic-task-focus-note" class="guided-task-note"></div>
       <div id="basic-task-focus-extra" class="request-state"></div>
@@ -53,14 +53,14 @@
     <section id="section-expert-overview" class="mode-shell expert expert-surface expert-surface-intro" hidden>
       <div class="section-header">
         <h2>Erweitert</h2>
-        <span class="section-hint">Sonderpfade und technische Detailstarts, getrennt vom Hauptweg.</span>
+        <span class="section-hint">Sonderpfade und Spezialstarts</span>
       </div>
       <div class="mode-shell-copy">
-        <div id="expert-overview-copy" class="request-state">Der Basismodus bleibt der normale Alltagsweg.</div>
-        <div id="expert-overview-subcopy" class="request-state">Nutze diesen Bereich nur, wenn du bewusst einen Sonderpfad brauchst.</div>
+        <div id="expert-overview-copy" class="request-state"></div>
+        <div id="expert-overview-subcopy" class="request-state"></div>
         <div id="guided-experimental-entry" class="guided-task-note guided-task-note-experimental">
           <strong>Sonderpfad: Neue Szene mit derselben Person</strong>
-          <span>Dieser Referenzpfad bleibt getrennt vom Hauptweg und ist fuer gezielte Spezialfaelle gedacht.</span>
+          <span>Experimentell. Getrennt vom Hauptweg.</span>
           <div class="actions">
             <button id="guided-task-identity-single" class="task-button" type="button">Neue Szene mit derselben Person</button>
             <button id="guided-open-expert" type="button">Sonderpfad aktivieren</button>
@@ -83,15 +83,15 @@
             <div class="generate-prompt-label-row">
               <label for="prompt">Prompt</label>
               <div class="generate-prompt-actions">
-                <button id="prompt-speech-button" class="generate-speech-button" type="button" title="Diktat">🎤</button>
+                <button id="prompt-speech-button" class="generate-speech-button" type="button" title="Diktat">Mic</button>
                 <span id="prompt-speech-state" class="generate-speech-feedback" aria-live="polite"></span>
               </div>
             </div>
             <textarea id="prompt" class="generate-prompt-input">portrait photo of a person, cinematic lighting, realistic lens rendering</textarea>
           </div>
 
-          <!-- Negative Prompt (Optional, Toggled) -->
-          <div id="negative-prompt-block" class="generate-negative-zone" hidden>
+          <!-- Negative Prompt -->
+          <div id="negative-prompt-block" class="generate-negative-zone">
             <label for="negative-prompt">Negativ</label>
             <textarea id="negative-prompt" class="generate-negative-input" placeholder="z.B. unscharf, low quality"></textarea>
             <div id="standard-negative-prompt-row" class="generate-negative-standard" hidden>
@@ -113,7 +113,7 @@
         <div class="generate-options-panel">
           <button id="generate-options-toggle" class="generate-options-header" type="button">
             <span>Optionen</span>
-            <span class="generate-options-arrow">▼</span>
+            <span class="generate-options-arrow">v</span>
           </button>
           
           <div id="generate-options-content" class="generate-options-content" hidden>
@@ -168,6 +168,8 @@
         <button id="generate" type="button" disabled>Generieren</button>
         <span id="request-state" class="generate-status">System wird geprueft...</span>
       </div>
+      <div id="action-feedback" class="status-line"></div>
+      <div id="system-summary" class="status-line"></div>
 
       <!-- Progress Panel (Inline, Compact) -->
       <div id="generate-progress-panel" class="generate-progress-compact" hidden>
@@ -184,8 +186,8 @@
 
     <section id="section-text-service-basic" class="basic-surface basic-surface-work">
       <div class="section-header">
-        <h2 id="text-service-basic-section-title">Schreiben und Ueberarbeiten</h2>
-        <span id="text-service-basic-section-hint" class="section-hint">Szene, Text und Bildvorbereitung in einem ruhigen Arbeitsfluss</span>
+        <h2 id="text-service-basic-section-title">Schreiben</h2>
+        <span id="text-service-basic-section-hint" class="section-hint">Texte schreiben, ueberarbeiten und Bildprompts ableiten</span>
       </div>
       <div id="text-service-basic-guide" class="guided-task-note" hidden></div>
 
@@ -205,15 +207,15 @@
               <div id="text-chat-slots" class="text-chat-slots topbar-chat-slots"></div>
             </div>
             
-            <!-- SECTION 3: Primäre Aktionen -->
+            <!-- SECTION 3: Primaere Aktionen -->
             <div class="topbar-actions-group scene-bar-actions">
-              <button id="scene-toggle-list" class="scene-toggle-list-button" type="button" title="Szenenlist anzeigen/verstecken">Szenen</button>
+              <button id="scene-toggle-list" class="scene-toggle-list-button" type="button" title="Szenenliste anzeigen/verstecken">Szenen</button>
               <button id="scene-new" class="text-copy-button" type="button" title="Neue Szene erstellen">Neu</button>
               <button id="scene-save" class="text-copy-button" type="button" title="Szene speichern">Speichern</button>
-              <button id="text-actions-more" class="text-actions-more" type="button" title="Weitere Optionen">⋯</button>
+              <button id="text-actions-more" class="text-actions-more" type="button" title="Weitere Optionen">...</button>
             </div>
             
-            <!-- Overflow-Menu: Sekundäre Aktionen -->
+            <!-- Overflow-Menu: Sekundaere Aktionen -->
             <div id="text-actions-menu" class="text-actions-menu" hidden>
               <div class="topbar-action-group topbar-chat-actions">
                 <button id="text-chat-new" class="text-copy-button" type="button">+ Chat</button>
@@ -222,7 +224,7 @@
               </div>
               <span class="topbar-sep" aria-hidden="true"></span>
               <div class="topbar-action-group topbar-scene-actions-secondary">
-                <button id="scene-delete" class="text-copy-button scene-delete-button" type="button">Löschen</button>
+                <button id="scene-delete" class="text-copy-button scene-delete-button" type="button">Loeschen</button>
               </div>
             </div>
           </div>
@@ -250,10 +252,10 @@
         <!-- HAUPTBEREICH: Linke Editorspalte + Rechtes Seitenpanel -->
         <div class="text-workspace-columns">
 
-          <!-- LINKS: Textkörper + Vorschlag + Verlauf -->
+          <!-- LINKS: Textkoerper + Vorschlag + Verlauf -->
           <div class="text-workspace-left">
 
-            <!-- Textkörper -->
+            <!-- Textkoerper -->
             <div class="text-editor-zone">
               <div class="text-body-toolbar">
                 <label for="text-body">Dein Text</label>
@@ -791,11 +793,11 @@
               <textarea id="identity-transfer-prompt">same person on a different body pose, realistic portrait, natural light, detailed face</textarea>
               <div class="actions">
                 <button id="identity-transfer-generate" type="button">Standardpfad starten</button>
-                <button id="identity-transfer-mask-hybrid-generate" type="button">Masken-Hybrid Masken-Hybrid starten</button>
-                <span id="identity-transfer-run-state" class="request-state">Noch kein Standardpfad-Testlauflauf</span>
+                <button id="identity-transfer-mask-hybrid-generate" type="button">Masken-Hybrid starten</button>
+                <span id="identity-transfer-run-state" class="request-state">Noch kein Standardpfad-Testlauf</span>
               </div>
               <div id="identity-transfer-run-card-copy" class="expert-zone-copy">Ergebnis oder Fehler des gestarteten Testpfads.</div>
-              <div id="identity-transfer-mask-hybrid-scope" class="expert-zone-copy">Masken-Hybrid-Spezialpfad: getrennt vom stabilen Standardpfadpfad.</div>
+              <div id="identity-transfer-mask-hybrid-scope" class="expert-zone-copy">Masken-Hybrid-Spezialpfad: getrennt vom stabilen Standardpfad.</div>
               <div id="identity-transfer-mask-hybrid-limits" class="request-state">Geeignet fuer realistische Einzelpersonen mit sinnvoll gefuellter Kopfmaske. Konturmaske allein wirkt kaum. Fantasy-/Nicht-Mensch nicht empfohlen.</div>
               <div id="identity-transfer-run-hint" class="request-state"></div>
               <img id="identity-transfer-result-image" alt="identity transfer result preview">
@@ -830,8 +832,8 @@
         <div class="results-toolbar">
           <button id="results-refresh" class="tool-button" type="button">Aktualisieren</button>
         </div>
-        <div id="results-state" class="result-status-line">–</div>
-        <div id="results-storage" class="result-status-line">–</div>
+        <div id="results-state" class="result-status-line">-</div>
+        <div id="results-storage" class="result-status-line">-</div>
         <span id="results-export-state" class="result-status-line"></span>
         <span id="results-delete-state" class="result-status-line"></span>
       </div>
@@ -861,6 +863,7 @@
   <script src='/app.js'></script>
 </body>
 </html>
+
 
 
 

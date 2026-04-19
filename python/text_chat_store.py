@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -28,8 +29,21 @@ def text_chat_connection(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
+@contextmanager
+def text_chat_connection_context(db_path: Path):
+    connection = text_chat_connection(db_path)
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def ensure_text_chat_store(db_path: Path, *, slot_count: int) -> None:
-    with text_chat_connection(db_path) as connection:
+    with text_chat_connection_context(db_path) as connection:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS text_chat_slots (
@@ -123,38 +137,17 @@ def excerpt_text(value: str, *, limit: int) -> str:
     normalized = re.sub(r"\s+", " ", str(value or "").strip())
     if len(normalized) <= limit:
         return normalized
-    return f"{normalized[: max(0, limit - 1)].rstrip()}â€¦"
+    return f"{normalized[: max(0, limit - 3)].rstrip()}..."
 
 
 def infer_text_chat_language_from_text(value: str) -> str:
     sample = f" {str(value or '').lower()} "
     german_score = 0
     english_score = 0
-    german_tokens = (
-        " der ",
-        " die ",
-        " das ",
-        " und ",
-        " nicht ",
-        " bitte ",
-        " fuer ",
-        " fÃ¼r ",
-        " mit ",
-        " ich ",
-    )
-    english_tokens = (
-        " the ",
-        " and ",
-        " please ",
-        " with ",
-        " this ",
-        " that ",
-        " write ",
-        " prompt ",
-        " image ",
-    )
-    if re.search(r"[Ã¤Ã¶Ã¼ÃŸ]", sample):
-        german_score += 2
+    german_tokens = (" der ", " die ", " das ", " und ", " nicht ", " bitte ", " fuer ", " mit ", " ich ")
+    english_tokens = (" the ", " and ", " please ", " with ", " this ", " that ", " write ", " prompt ", " image ")
+    if any(token in sample for token in (" fuer ", " ue ", " ae ", " oe ")):
+        german_score += 1
     german_score += sum(1 for token in german_tokens if token in sample)
     english_score += sum(1 for token in english_tokens if token in sample)
     return "en" if english_score > german_score else "de"
@@ -162,7 +155,7 @@ def infer_text_chat_language_from_text(value: str) -> str:
 
 def get_active_text_chat_slot_index(db_path: Path, *, slot_count: int) -> int:
     ensure_text_chat_store(db_path, slot_count=slot_count)
-    with text_chat_connection(db_path) as connection:
+    with text_chat_connection_context(db_path) as connection:
         row = connection.execute(
             "SELECT state_value FROM text_chat_state WHERE state_key = 'active_slot_index'"
         ).fetchone()
@@ -178,7 +171,7 @@ def set_active_text_chat_slot_index(
     db_path: Path, slot_index: int, *, slot_count: int
 ) -> None:
     ensure_text_chat_store(db_path, slot_count=slot_count)
-    with text_chat_connection(db_path) as connection:
+    with text_chat_connection_context(db_path) as connection:
         connection.execute(
             """
             INSERT INTO text_chat_state (state_key, state_value)
@@ -197,7 +190,7 @@ def list_text_chat_messages(
     limit: int,
 ) -> list[dict]:
     ensure_text_chat_store(db_path, slot_count=slot_count)
-    with text_chat_connection(db_path) as connection:
+    with text_chat_connection_context(db_path) as connection:
         rows = connection.execute(
             """
             SELECT id, role, content, created_at
@@ -287,7 +280,7 @@ def update_text_chat_slot_metadata(
     if not assignments:
         return
     values.append(slot_index)
-    with text_chat_connection(db_path) as connection:
+    with text_chat_connection_context(db_path) as connection:
         connection.execute(
             f"UPDATE text_chat_slots SET {', '.join(assignments)} WHERE slot_index = ?",
             values,
@@ -296,10 +289,8 @@ def update_text_chat_slot_metadata(
 
 def clear_text_chat_slot(db_path: Path, slot_index: int, *, slot_count: int) -> None:
     ensure_text_chat_store(db_path, slot_count=slot_count)
-    with text_chat_connection(db_path) as connection:
-        connection.execute(
-            "DELETE FROM text_chat_messages WHERE slot_index = ?", (slot_index,)
-        )
+    with text_chat_connection_context(db_path) as connection:
+        connection.execute("DELETE FROM text_chat_messages WHERE slot_index = ?", (slot_index,))
         connection.execute(
             """
             UPDATE text_chat_slots
@@ -356,7 +347,7 @@ def append_text_chat_message(
     now_iso: str,
 ) -> None:
     ensure_text_chat_store(db_path, slot_count=slot_count)
-    with text_chat_connection(db_path) as connection:
+    with text_chat_connection_context(db_path) as connection:
         connection.execute(
             """
             INSERT INTO text_chat_messages (slot_index, role, content, created_at)
@@ -375,7 +366,7 @@ def get_text_chat_slot(
     visible_messages_limit: int,
 ) -> dict:
     ensure_text_chat_store(db_path, slot_count=slot_count)
-    with text_chat_connection(db_path) as connection:
+    with text_chat_connection_context(db_path) as connection:
         slot_row = connection.execute(
             """
             SELECT slot_index, title, summary, language, model_profile, model, created_at, updated_at
@@ -536,3 +527,4 @@ def create_text_chat_in_first_empty_slot(
                 default_visible_messages_limit=default_visible_messages_limit,
             )
     return None
+

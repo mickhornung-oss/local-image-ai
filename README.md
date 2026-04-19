@@ -10,6 +10,16 @@ Texte schreiben, ueberarbeiten, Bildprompts ableiten, Stil waehlen und Bilder er
 
 > **Deutsch:** StoryForge Local arbeitet textzentriert. Szenen sind das persistente Arbeitsobjekt. Bild folgt dem Text.
 
+---
+
+### Hinweis / Note
+
+**DE:** StoryForge Local befindet sich in aktiver Weiterentwicklung. Die Kernfunktionen laufen bereits und liefern gute Ergebnisse, aber es gibt noch kleinere Fehler, UI-/UX-Unsauberkeiten und offenen Feinschliff. Das Projekt ist benutzbar, jedoch noch nicht vollstaendig finalisiert.
+
+**EN:** StoryForge Local is still under active development. The core features are already working and produce good results, but there are still smaller issues, UI/UX inconsistencies, and unfinished polish. The project is usable, but not yet fully finalized.
+
+---
+
 ## Hauptfluss
 
 1. Neue Szene anlegen und benennen
