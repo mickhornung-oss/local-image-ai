@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from email.parser import BytesParser
 from email.policy import default as email_policy_default
 from http import HTTPStatus
 from pathlib import Path
-import tempfile
-
 
 DEFAULT_SPEECH_LANGUAGE = "de"
 DEFAULT_OPENAI_WHISPER_MODEL = "base"
@@ -16,7 +15,9 @@ DEFAULT_FASTER_WHISPER_MODEL = "small"
 DEFAULT_FASTER_WHISPER_DEVICE = "cpu"
 DEFAULT_FASTER_WHISPER_COMPUTE_TYPE = "int8"
 MAX_AUDIO_BYTES = 16 * 1024 * 1024
-SUPPORTED_AUDIO_EXTENSIONS = frozenset({".webm", ".wav", ".ogg", ".m4a", ".mp3", ".flac"})
+SUPPORTED_AUDIO_EXTENSIONS = frozenset(
+    {".webm", ".wav", ".ogg", ".m4a", ".mp3", ".flac"}
+)
 
 
 class SpeechTranscriptionError(Exception):
@@ -47,7 +48,9 @@ _MODEL_CACHE: dict[str, object] = {}
 
 
 def sanitize_file_name(filename: str | None) -> str:
-    normalized = Path(str(filename or "speech-input.webm")).name.replace("\x00", "").strip()
+    normalized = (
+        Path(str(filename or "speech-input.webm")).name.replace("\x00", "").strip()
+    )
     return normalized or "speech-input.webm"
 
 
@@ -66,7 +69,8 @@ def _normalize_language(value: object) -> str:
 
 def parse_multipart_audio(content_type: str, body: bytes) -> tuple[str, bytes, str]:
     message = BytesParser(policy=email_policy_default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        + body
     )
     if not message.is_multipart():
         raise SpeechTranscriptionError(
@@ -81,7 +85,11 @@ def parse_multipart_audio(content_type: str, body: bytes) -> tuple[str, bytes, s
     for part in message.iter_parts():
         if part.get_content_disposition() != "form-data":
             continue
-        field_name = str(part.get_param("name", header="content-disposition") or "").strip().lower()
+        field_name = (
+            str(part.get_param("name", header="content-disposition") or "")
+            .strip()
+            .lower()
+        )
         filename = part.get_filename()
         if not filename:
             if field_name == "language":
@@ -192,22 +200,37 @@ def _load_cached_model(cache_key: str, loader):
 def _transcribe_with_faster_whisper(audio_path: Path, language: str) -> str:
     from faster_whisper import WhisperModel
 
-    model_name = str(os.environ.get("STORYFORGE_STT_MODEL") or DEFAULT_FASTER_WHISPER_MODEL).strip()
-    device = str(os.environ.get("STORYFORGE_STT_DEVICE") or DEFAULT_FASTER_WHISPER_DEVICE).strip()
-    compute_type = str(os.environ.get("STORYFORGE_STT_COMPUTE_TYPE") or DEFAULT_FASTER_WHISPER_COMPUTE_TYPE).strip()
+    model_name = str(
+        os.environ.get("STORYFORGE_STT_MODEL") or DEFAULT_FASTER_WHISPER_MODEL
+    ).strip()
+    device = str(
+        os.environ.get("STORYFORGE_STT_DEVICE") or DEFAULT_FASTER_WHISPER_DEVICE
+    ).strip()
+    compute_type = str(
+        os.environ.get("STORYFORGE_STT_COMPUTE_TYPE")
+        or DEFAULT_FASTER_WHISPER_COMPUTE_TYPE
+    ).strip()
     cache_key = f"faster_whisper::{model_name}::{device}::{compute_type}"
     model = _load_cached_model(
         cache_key,
         lambda: WhisperModel(model_name, device=device, compute_type=compute_type),
     )
-    segments, _ = model.transcribe(str(audio_path), language=language or None, vad_filter=True)
-    return " ".join(str(segment.text or "").strip() for segment in segments if str(segment.text or "").strip()).strip()
+    segments, _ = model.transcribe(
+        str(audio_path), language=language or None, vad_filter=True
+    )
+    return " ".join(
+        str(segment.text or "").strip()
+        for segment in segments
+        if str(segment.text or "").strip()
+    ).strip()
 
 
 def _transcribe_with_openai_whisper(audio_path: Path, language: str) -> str:
     import whisper
 
-    model_name = str(os.environ.get("STORYFORGE_STT_MODEL") or DEFAULT_OPENAI_WHISPER_MODEL).strip()
+    model_name = str(
+        os.environ.get("STORYFORGE_STT_MODEL") or DEFAULT_OPENAI_WHISPER_MODEL
+    ).strip()
     cache_key = f"openai_whisper::{model_name}"
     model = _load_cached_model(cache_key, lambda: whisper.load_model(model_name))
     result = model.transcribe(str(audio_path), language=language or None, fp16=False)
@@ -221,7 +244,9 @@ def transcribe_audio_payload(
     language: str | None = None,
     temp_root: Path | None = None,
 ) -> dict:
-    normalized_name, extension = _validate_audio_payload(sanitize_file_name(original_name), payload)
+    normalized_name, extension = _validate_audio_payload(
+        sanitize_file_name(original_name), payload
+    )
     normalized_language = _normalize_language(language)
     state = _detect_backend()
     if not state.available or not state.backend:
@@ -232,7 +257,9 @@ def transcribe_audio_payload(
             message=state.message,
         )
 
-    working_root = Path(temp_root) if temp_root is not None else Path(tempfile.gettempdir())
+    working_root = (
+        Path(temp_root) if temp_root is not None else Path(tempfile.gettempdir())
+    )
     working_root.mkdir(parents=True, exist_ok=True)
 
     temp_file_path: Path | None = None
@@ -248,9 +275,13 @@ def transcribe_audio_payload(
             temp_file_path = Path(temp_file.name)
 
         if state.backend == "faster_whisper":
-            transcript = _transcribe_with_faster_whisper(temp_file_path, normalized_language)
+            transcript = _transcribe_with_faster_whisper(
+                temp_file_path, normalized_language
+            )
         elif state.backend == "openai_whisper":
-            transcript = _transcribe_with_openai_whisper(temp_file_path, normalized_language)
+            transcript = _transcribe_with_openai_whisper(
+                temp_file_path, normalized_language
+            )
         else:
             transcript = ""
 

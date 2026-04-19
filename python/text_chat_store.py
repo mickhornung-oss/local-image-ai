@@ -144,8 +144,28 @@ def infer_text_chat_language_from_text(value: str) -> str:
     sample = f" {str(value or '').lower()} "
     german_score = 0
     english_score = 0
-    german_tokens = (" der ", " die ", " das ", " und ", " nicht ", " bitte ", " fuer ", " mit ", " ich ")
-    english_tokens = (" the ", " and ", " please ", " with ", " this ", " that ", " write ", " prompt ", " image ")
+    german_tokens = (
+        " der ",
+        " die ",
+        " das ",
+        " und ",
+        " nicht ",
+        " bitte ",
+        " fuer ",
+        " mit ",
+        " ich ",
+    )
+    english_tokens = (
+        " the ",
+        " and ",
+        " please ",
+        " with ",
+        " this ",
+        " that ",
+        " write ",
+        " prompt ",
+        " image ",
+    )
     if any(token in sample for token in (" fuer ", " ue ", " ae ", " oe ")):
         german_score += 1
     german_score += sum(1 for token in german_tokens if token in sample)
@@ -290,7 +310,9 @@ def update_text_chat_slot_metadata(
 def clear_text_chat_slot(db_path: Path, slot_index: int, *, slot_count: int) -> None:
     ensure_text_chat_store(db_path, slot_count=slot_count)
     with text_chat_connection_context(db_path) as connection:
-        connection.execute("DELETE FROM text_chat_messages WHERE slot_index = ?", (slot_index,))
+        connection.execute(
+            "DELETE FROM text_chat_messages WHERE slot_index = ?", (slot_index,)
+        )
         connection.execute(
             """
             UPDATE text_chat_slots
@@ -527,4 +549,3 @@ def create_text_chat_in_first_empty_slot(
                 default_visible_messages_limit=default_visible_messages_limit,
             )
     return None
-

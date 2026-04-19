@@ -130,6 +130,7 @@ from render_identity_research import (
     build_identity_research_runtime_state,
     run_identity_research,
 )
+
 try:
     import scene_store
 except ModuleNotFoundError:
@@ -1595,7 +1596,7 @@ def resolve_text_chat_slot_request_path(
 def resolve_scene_request_path(request_path: str) -> tuple[str, str | None] | None:
     if not request_path.startswith(SCENE_ID_PREFIX):
         return None
-    remainder = request_path[len(SCENE_ID_PREFIX):]
+    remainder = request_path[len(SCENE_ID_PREFIX) :]
     if not remainder:
         return None
     parts = remainder.split("/", 1)
@@ -1611,7 +1612,13 @@ def get_scene_overview() -> dict:
 
 
 def build_scene_error_response(*, error_type: str, blocker: str, message: str) -> dict:
-    return {"status": "error", "ok": False, "error_type": error_type, "blocker": blocker, "message": message}
+    return {
+        "status": "error",
+        "ok": False,
+        "error_type": error_type,
+        "blocker": blocker,
+        "message": message,
+    }
 
 
 def parse_scene_results_limit(query_string: str) -> int:
@@ -1633,7 +1640,9 @@ def parse_scene_results_limit(query_string: str) -> int:
     return value
 
 
-def list_scene_result_items(scene_id: str, *, limit: int = 24) -> tuple[list[dict], list[str], int]:
+def list_scene_result_items(
+    scene_id: str, *, limit: int = 24
+) -> tuple[list[dict], list[str], int]:
     entries = scene_store.list_scene_result_entries(scene_db_path(), scene_id)
     total_count = len(entries)
     limited_entries = entries[: max(1, int(limit))]
@@ -1668,7 +1677,9 @@ def create_scene_export(scene_id: str) -> dict:
             message="Scene not found.",
         )
 
-    result_items, missing_result_ids, total_count = list_scene_result_items(scene_id, limit=200)
+    result_items, missing_result_ids, total_count = list_scene_result_items(
+        scene_id, limit=200
+    )
     export_dir = scene_exports_root()
     export_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1710,7 +1721,9 @@ def create_scene_export(scene_id: str) -> dict:
             prompt_snippet = prompt[:180].strip()
             lines.append(f"- {created_at} | {mode} | {file_name}")
             if prompt_snippet:
-                lines.append(f"  - Prompt: {prompt_snippet}{'...' if len(prompt) > 180 else ''}")
+                lines.append(
+                    f"  - Prompt: {prompt_snippet}{'...' if len(prompt) > 180 else ''}"
+                )
             if download_url:
                 lines.append(f"  - Download: {download_url}")
             if preview_url:
@@ -1737,7 +1750,9 @@ def create_scene_export(scene_id: str) -> dict:
         "result_items": result_items,
         "exported_at": datetime.now(timezone.utc).isoformat(),
     }
-    json_path.write_text(json.dumps(export_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(export_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     return {
         "status": "ok",
@@ -1752,6 +1767,7 @@ def create_scene_export(scene_id: str) -> dict:
         "missing_result_ids": missing_result_ids,
         "exported_at": export_payload["exported_at"],
     }
+
 
 def output_dir_access_state() -> tuple[bool, str | None]:
     root = output_root()
@@ -3630,9 +3646,16 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             return
 
         workflow_name = prepared.get("workflow")
-        workflow_override = workflow_name if isinstance(workflow_name, str) and workflow_name.strip() else None
+        workflow_override = (
+            workflow_name
+            if isinstance(workflow_name, str) and workflow_name.strip()
+            else None
+        )
 
-        response_status, response_payload = generate_endpoint_flow.execute_generate_endpoint(
+        (
+            response_status,
+            response_payload,
+        ) = generate_endpoint_flow.execute_generate_endpoint(
             render_callable=lambda: run_render(
                 prompt=str(render_request["render_prompt"]),
                 mode=mode,
@@ -4378,7 +4401,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         text_body = str(body.get("body") or "").strip()
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            created = scene_store.create_scene(scene_db_path(), title=title, body=text_body, now_iso=now_iso)
+            created = scene_store.create_scene(
+                scene_db_path(), title=title, body=text_body, now_iso=now_iso
+            )
             scene_store.set_active_scene_id(scene_db_path(), created["id"])
             payload = get_scene_overview()
         except OSError as exc:
@@ -4416,7 +4441,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 ),
             )
             return
-        result_items, missing_result_ids, total_count = list_scene_result_items(scene_id, limit=24)
+        result_items, missing_result_ids, total_count = list_scene_result_items(
+            scene_id, limit=24
+        )
         result_ids = scene_store.list_scene_results(scene_db_path(), scene_id)
         self.send_json(
             HTTPStatus.OK,
@@ -4462,7 +4489,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if "last_prompt" in body and isinstance(body.get("last_prompt"), str):
             last_prompt = str(body["last_prompt"]).strip() or None
         last_negative_prompt: str | None = None
-        if "last_negative_prompt" in body and isinstance(body.get("last_negative_prompt"), str):
+        if "last_negative_prompt" in body and isinstance(
+            body.get("last_negative_prompt"), str
+        ):
             last_negative_prompt = str(body["last_negative_prompt"]).strip() or None
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
@@ -4585,7 +4614,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             now_iso = datetime.now(timezone.utc).isoformat()
-            scene_store.add_scene_result(scene_db_path(), scene_id, result_id, now_iso=now_iso)
+            scene_store.add_scene_result(
+                scene_db_path(), scene_id, result_id, now_iso=now_iso
+            )
         except OSError as exc:
             self.send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -4597,7 +4628,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             )
             return
         results = scene_store.list_scene_results(scene_db_path(), scene_id)
-        self.send_json(HTTPStatus.OK, {"ok": True, "scene_id": scene_id, "result_ids": results})
+        self.send_json(
+            HTTPStatus.OK, {"ok": True, "scene_id": scene_id, "result_ids": results}
+        )
 
     def handle_scene_results_list(self, scene_id: str) -> None:
         parsed = urlparse(self.path)
@@ -4615,7 +4648,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             results = scene_store.list_scene_results(scene_db_path(), scene_id)
-            result_items, missing_result_ids, total_count = list_scene_result_items(scene_id, limit=limit)
+            result_items, missing_result_ids, total_count = list_scene_result_items(
+                scene_id, limit=limit
+            )
         except OSError as exc:
             self.send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -5426,7 +5461,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
     def serve_frontend_asset(self, request_path: str) -> None:
         file_name = FRONTEND_ASSET_ROUTE_MAP.get(request_path)
         if file_name is None:
-            self.send_json(HTTPStatus.NOT_FOUND, {"status": "error", "reason": "not_found"})
+            self.send_json(
+                HTTPStatus.NOT_FOUND, {"status": "error", "reason": "not_found"}
+            )
             return
         self.serve_file(app_root() / file_name, read_error_status=HTTPStatus.NOT_FOUND)
 
@@ -5733,14 +5770,20 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def handle_speech_status(self) -> None:
-        self.send_json(HTTPStatus.OK, speech_transcription.build_runtime_state_payload())
+        self.send_json(
+            HTTPStatus.OK, speech_transcription.build_runtime_state_payload()
+        )
 
     def handle_speech_transcribe(self) -> None:
         content_type = self.headers.get("Content-Type", "")
         try:
             image_input_validation.validate_multipart_content_type(content_type)
             raw_body = self.read_body_bytes()
-            original_name, payload, language = speech_transcription.parse_multipart_audio(content_type, raw_body)
+            (
+                original_name,
+                payload,
+                language,
+            ) = speech_transcription.parse_multipart_audio(content_type, raw_body)
             response_payload = speech_transcription.transcribe_audio_payload(
                 original_name=original_name,
                 payload=payload,

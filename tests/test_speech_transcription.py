@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
 import python.speech_transcription as speech_transcription
 

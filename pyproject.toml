@@ -1,0 +1,15 @@
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+extend-exclude = '''
+/(
+    vendor
+  | stable-diffusion-webui
+  | venv
+  | \.venv
+)/
+'''
+
+[tool.isort]
+profile = "black"
+skip_glob = ["vendor/*", "stable-diffusion-webui/*", "venv/*", ".venv/*"]

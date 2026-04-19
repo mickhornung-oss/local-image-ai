@@ -64,7 +64,9 @@ def ensure_scene_store(db_path: Path) -> None:
         )
 
 
-def normalize_scene_title(value: object, *, max_length: int = 120) -> tuple[str | None, str | None]:
+def normalize_scene_title(
+    value: object, *, max_length: int = 120
+) -> tuple[str | None, str | None]:
     if value is None:
         return None, "missing_scene_title"
     if not isinstance(value, str):
@@ -82,8 +84,12 @@ def _build_scene_dict(row: sqlite3.Row) -> dict:
         "id": str(row["id"]),
         "title": str(row["title"]),
         "body": str(row["body"] or ""),
-        "last_prompt": str(row["last_prompt"]) if row["last_prompt"] is not None else None,
-        "last_negative_prompt": str(row["last_negative_prompt"]) if row["last_negative_prompt"] is not None else None,
+        "last_prompt": str(row["last_prompt"])
+        if row["last_prompt"] is not None
+        else None,
+        "last_negative_prompt": str(row["last_negative_prompt"])
+        if row["last_negative_prompt"] is not None
+        else None,
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
     }
@@ -205,7 +211,9 @@ def set_active_scene_id(db_path: Path, scene_id: str | None) -> None:
         )
 
 
-def add_scene_result(db_path: Path, scene_id: str, result_id: str, *, now_iso: str) -> None:
+def add_scene_result(
+    db_path: Path, scene_id: str, result_id: str, *, now_iso: str
+) -> None:
     ensure_scene_store(db_path)
     with scene_connection(db_path) as connection:
         connection.execute(

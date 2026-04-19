@@ -2,8 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![codecov](https://codecov.io/gh/mickhornung-oss/local-image-ai/branch/main/graph/badge.svg)](https://codecov.io/gh/mickhornung-oss/local-image-ai)
-[![Tests](https://github.com/mickhornung-oss/local-image-ai/actions/workflows/python-tests.yml/badge.svg)](https://github.com/mickhornung-oss/local-image-ai/actions)
+[![Tests](https://github.com/mickhornung-oss/local-image-ai/actions/workflows/python-tests.yml/badge.svg)](https://github.com/mickhornung-oss/local-image-ai/actions/workflows/python-tests.yml)
 
 Lokales Schreibwerkzeug fuer kreative Textarbeit mit direkter Bruecke zu Bildmaterial.
 Texte schreiben, ueberarbeiten, Bildprompts ableiten, Stil waehlen und Bilder erzeugen — alles in einer Browser-Oberflaeche auf deinem Rechner, ohne Cloud.
@@ -17,6 +16,12 @@ Texte schreiben, ueberarbeiten, Bildprompts ableiten, Stil waehlen und Bilder er
 **DE:** StoryForge Local befindet sich in aktiver Weiterentwicklung. Die Kernfunktionen laufen bereits und liefern gute Ergebnisse, aber es gibt noch kleinere Fehler, UI-/UX-Unsauberkeiten und offenen Feinschliff. Das Projekt ist benutzbar, jedoch noch nicht vollstaendig finalisiert.
 
 **EN:** StoryForge Local is still under active development. The core features are already working and produce good results, but there are still smaller issues, UI/UX inconsistencies, and unfinished polish. The project is usable, but not yet fully finalized.
+
+---
+
+## Demo
+
+![StoryForge Local – Schreibbereich und Bildgenerierung](images/local-image-ai-demo.png)
 
 ---
 

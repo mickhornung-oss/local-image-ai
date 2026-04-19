@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 try:
     import scene_store
@@ -24,7 +25,9 @@ def test_ensure_scene_store_creates_tables(db: Path) -> None:
 
 
 def test_create_and_get_scene(db: Path) -> None:
-    created = scene_store.create_scene(db, title="Kapitel 1", body="Es war einmal.", now_iso=NOW_ISO)
+    created = scene_store.create_scene(
+        db, title="Kapitel 1", body="Es war einmal.", now_iso=NOW_ISO
+    )
     assert created["title"] == "Kapitel 1"
     assert created["body"] == "Es war einmal."
     assert created["id"]
@@ -58,7 +61,9 @@ def test_list_scenes_multiple(db: Path) -> None:
 
 def test_update_scene_title(db: Path) -> None:
     created = scene_store.create_scene(db, title="Alt", now_iso=NOW_ISO)
-    updated = scene_store.update_scene(db, created["id"], title="Neu", now_iso=LATER_ISO)
+    updated = scene_store.update_scene(
+        db, created["id"], title="Neu", now_iso=LATER_ISO
+    )
     assert updated is not None
     assert updated["title"] == "Neu"
     assert updated["updated_at"] == LATER_ISO
@@ -66,7 +71,9 @@ def test_update_scene_title(db: Path) -> None:
 
 def test_update_scene_body(db: Path) -> None:
     created = scene_store.create_scene(db, title="T", body="Original", now_iso=NOW_ISO)
-    updated = scene_store.update_scene(db, created["id"], body="Geaendert", now_iso=LATER_ISO)
+    updated = scene_store.update_scene(
+        db, created["id"], body="Geaendert", now_iso=LATER_ISO
+    )
     assert updated is not None
     assert updated["body"] == "Geaendert"
 
@@ -74,7 +81,11 @@ def test_update_scene_body(db: Path) -> None:
 def test_update_scene_last_prompt(db: Path) -> None:
     created = scene_store.create_scene(db, title="T", now_iso=NOW_ISO)
     updated = scene_store.update_scene(
-        db, created["id"], last_prompt="cinematic portrait", last_negative_prompt="blurry", now_iso=LATER_ISO
+        db,
+        created["id"],
+        last_prompt="cinematic portrait",
+        last_negative_prompt="blurry",
+        now_iso=LATER_ISO,
     )
     assert updated is not None
     assert updated["last_prompt"] == "cinematic portrait"
